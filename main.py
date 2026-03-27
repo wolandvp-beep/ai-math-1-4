@@ -25,7 +25,7 @@ async def options():
 
 @app.get("/")
 def read_root():
-    return {"message": "Proxy is running. Use POST request with 'action' and payload."}
+    return {"message": "VERSION PHOTO OFF 27-03-2026"}
 
 @app.post("/")
 async def proxy(request: Request):
