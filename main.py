@@ -14,7 +14,7 @@ app.add_middleware(
 )
 
 # API-ключ DeepSeek (должен быть задан в переменных окружения Timeweb)
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
+DEEPSEEK_API_KEY = os.environ.get("myapp_ai_math_1_4_API_key")
 if not DEEPSEEK_API_KEY:
     raise RuntimeError("Переменная окружения DEEPSEEK_API_KEY не установлена")
 
