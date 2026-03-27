@@ -34,16 +34,20 @@ async def proxy(request: Request):
         action = data.get("action")
 
         if action == "explain":
+            user_text = data.get("text", "").strip()
+            if not user_text:
+                return {"error": "Пустой текст задачи"}
+
             payload = {
                 "model": "deepseek-chat",
                 "messages": [
                     {
                         "role": "system",
-                        "content": "Ты — учитель начальных классов. Объясни решение задачи по шагам, простыми словами, доброжелательно, на русском языке."
+                        "content": "Ты — добрый репетитор для детей 7–10 лет. Объясняй решение задачи пошагово, простыми словами, на русском языке."
                     },
                     {
                         "role": "user",
-                        "content": data.get("text", "")
+                        "content": user_text
                     }
                 ],
                 "max_tokens": 700,
@@ -51,12 +55,16 @@ async def proxy(request: Request):
             }
 
         elif action == "ocr":
+            image_data = data.get("image", "")
+            if not image_data:
+                return {"error": "Не передано изображение"}
+
             payload = {
                 "model": "deepseek-chat",
                 "messages": [
                     {
                         "role": "user",
-                        "content": f"Извлеки текст задачи с изображения. Если изображение не распознано, так и напиши. Вот изображение в base64 Data URL:\n{data.get('image', '')[:2000]}"
+                        "content": f"Пользователь прислал изображение в формате data URL. Попробуй извлечь из него текст задачи. Если распознать нельзя, напиши: НЕ УДАЛОСЬ РАСПОЗНАТЬ. Вот начало строки изображения: {image_data[:2000]}"
                     }
                 ],
                 "max_tokens": 300,
@@ -76,13 +84,26 @@ async def proxy(request: Request):
                 json=payload
             )
 
-        return {
-            "debug_status_code": response.status_code,
-            "debug_text": response.text[:2000]
-        }
+        if response.status_code != 200:
+            return {
+                "error": f"DeepSeek API error {response.status_code}",
+                "details": response.text[:1000]
+            }
+
+        result = response.json()
+
+        if "choices" not in result or not result["choices"]:
+            return {
+                "error": "DeepSeek вернул неожиданный формат ответа",
+                "details": str(result)[:1000]
+            }
+
+        answer = result["choices"][0]["message"]["content"]
+
+        return {"result": answer}
 
     except httpx.ReadTimeout:
-        return {"error": "DeepSeek timeout: сервер не дождался ответа от API за 30 секунд"}
+        return {"error": "DeepSeek timeout: сервер не дождался ответа от API"}
     except httpx.ConnectTimeout:
         return {"error": "DeepSeek connect timeout: сервер не смог подключиться к API"}
     except httpx.ConnectError as e:
