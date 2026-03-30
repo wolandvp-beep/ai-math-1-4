@@ -39,36 +39,14 @@ SYSTEM_PROMPT = """
 10. Если текст на фото плохо читается или часть задачи не видна, честно скажи, что фото нужно сделать чётче.
 11. Ответ должен быть понятен ребёнку младшей школы.
 
-Строй ответ ВСЕГДА по такому шаблону:
-
-Сначала смотрим, что было в начале:
-...
-
-Потом читаем, что произошло:
-...
-
-Теперь думаем, стало больше или меньше.
-Если в задаче сказано "ещё", "добавили", "подарили", "принесли", значит стало больше.
-Когда становится больше, мы складываем.
-Если в задаче сказано "ушло", "отдали", "съели", "забрали", "улетели", значит стало меньше.
-Когда становится меньше, мы вычитаем.
-
-Потом объясни, почему именно здесь нужно выбрать это действие.
-
-Записываем решение:
-...
-
-Значит, ...
-
-Ответ:
-...
-
-Чтобы решать такие задачи самому, запомни ход мысли:
-было — ...
-изменилось — ...
-стало больше или меньше — ...
-выбираю действие — ...
-получаю ответ — ...
+Строй ответ по такой логике:
+Сначала смотрим, что было в начале.
+Потом читаем, что произошло.
+Потом думаем, стало больше или меньше.
+Потом объясняем, почему выбираем именно это действие.
+Потом записываем решение.
+Потом даём ответ.
+В конце даём шаблон мышления для похожих задач.
 """.strip()
 
 
@@ -82,10 +60,10 @@ def extract_data_url_parts(image_value: str):
         if not match:
             raise ValueError("Некорректный формат изображения")
         mime_type = match.group(1)
-        base64_data = match.group(2)
+        base64_data = match.group(2).strip()
         return mime_type, base64_data
 
-    return "image/jpeg", image_value
+    return "image/jpeg", image_value.strip()
 
 
 async def call_deepseek(payload: dict, timeout_seconds: float = 60.0):
@@ -101,22 +79,19 @@ async def call_deepseek(payload: dict, timeout_seconds: float = 60.0):
 
     if response.status_code != 200:
         return {
-            "error": f"DeepSeek API error {response.status_code}",
-            "details": response.text[:1500],
+            "result": f"DeepSeek API error {response.status_code}\\n\\n{response.text[:3000]}"
         }
 
     try:
         result = response.json()
     except Exception:
         return {
-            "error": "DeepSeek вернул не JSON",
-            "details": response.text[:1500],
+            "result": f"DeepSeek вернул не JSON\\n\\n{response.text[:3000]}"
         }
 
     if "choices" not in result or not result["choices"]:
         return {
-            "error": "DeepSeek вернул неожиданный формат ответа",
-            "details": str(result)[:1500],
+            "result": f"DeepSeek вернул неожиданный формат ответа\\n\\n{str(result)[:3000]}"
         }
 
     message = result["choices"][0].get("message", {})
@@ -124,8 +99,7 @@ async def call_deepseek(payload: dict, timeout_seconds: float = 60.0):
 
     if not answer:
         return {
-            "error": "DeepSeek вернул пустой ответ",
-            "details": str(result)[:1500],
+            "result": f"DeepSeek вернул пустой ответ\\n\\n{str(result)[:3000]}"
         }
 
     return {"result": answer}
@@ -163,7 +137,7 @@ async def proxy(request: Request):
                         "role": "user",
                         "content": (
                             "Объясни ребёнку эту задачу так, чтобы он понял, "
-                            "как решать похожие задачи:\n\n"
+                            "как решать похожие задачи:\\n\\n"
                             f"{user_text}"
                         ),
                     },
@@ -181,31 +155,35 @@ async def proxy(request: Request):
             except ValueError as e:
                 return {"error": str(e)}
 
+            full_prompt = (
+                "На фото задача из учебника. Сначала внимательно прочитай её. "
+                "Если текст читается плохо или виден не полностью, честно скажи, "
+                "что нужно более чёткое фото. Если текст читается хорошо, "
+                "сразу объясни задачу ребёнку по этим правилам: "
+                "пиши простыми короткими фразами, не используй markdown, "
+                "объясни, как понять, какое действие выбрать, "
+                "и в конце дай шаблон мышления для похожих задач.\\n\\n"
+                f"{SYSTEM_PROMPT}"
+            )
+
             payload = {
                 "model": "deepseek-vl",
                 "messages": [
-                    {
-                        "role": "system",
-                        "content": SYSTEM_PROMPT,
-                    },
                     {
                         "role": "user",
                         "content": [
                             {
                                 "type": "image_url",
-                                "image_url": f"data:{mime_type};base64,{image_base64}",
+                                "image_url": {
+                                    "url": f"data:{mime_type};base64,{image_base64}"
+                                }
                             },
                             {
                                 "type": "text",
-                                "text": (
-                                    "На фото задача из учебника. Сначала внимательно прочитай её. "
-                                    "Если текст читается плохо или виден не полностью, честно скажи, "
-                                    "что нужно более чёткое фото. Если текст читается хорошо, "
-                                    "сразу объясни задачу ребёнку по тем же правилам, что и для текстового ввода."
-                                ),
-                            },
-                        ],
-                    },
+                                "text": full_prompt
+                            }
+                        ]
+                    }
                 ],
                 "max_tokens": 900,
                 "temperature": 0.2,
