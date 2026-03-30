@@ -25,7 +25,7 @@ async def options():
 
 @app.get("/")
 def read_root():
-    return {"message": "VERSION PHOTO OFF 27-03-2026"}
+    return {"message": "Proxy is running. Use POST request with 'action' and payload."}
 
 @app.post("/")
 async def proxy(request: Request):
@@ -83,7 +83,7 @@ async def proxy(request: Request):
 
         elif action == "ocr":
             return {
-                "error": "Распознавание по фото пока временно отключено: текущая версия может распознавать изображение неверно. Пожалуйста, введите текст задачи вручную."
+                "error": "Распознавание по фото временно отключено. Пожалуйста, нажмите «Ввести текст» и введите задачу вручную."
             }
 
         else:
