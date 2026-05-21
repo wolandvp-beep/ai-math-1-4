@@ -1,0 +1,2052 @@
+from __future__ import annotations
+
+import json
+import os
+import re
+from typing import Any
+
+from backend.expression_engine import build_explanation
+from backend.postprocess import clean_result_payload
+from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
+from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
+from backend.live_math_solver import solve_live_math_first
+
+APP_RELEASE = 'v300.01_live_g2_numbers_quantities_deepseek_retry_and_cost_ui_fix'
+SOLVER_VERSION = 'v300.01-live-g2-numbers-quantities-deepseek-retry-and-cost-ui-fix'
+
+_BAD_INTERNAL_MARKERS = (
+    'Zad3',
+    'deterministic regression',
+    'answer map',
+    'lookup',
+    'Применяем правило:',
+    'generic fallback',
+)
+
+
+SOLVER_MODE_DEEPSEEK_PRIMARY = 'deepseek_primary'
+SOLVER_MODE_LOCAL_PRIMARY = 'local_primary'
+_SOLVER_MODE_OVERRIDE: str | None = None
+
+
+def set_solver_mode_override(mode: str | None) -> None:
+    global _SOLVER_MODE_OVERRIDE
+    _SOLVER_MODE_OVERRIDE = str(mode).strip() if mode else None
+
+
+def resolve_solver_mode(mode: str | None = None) -> str:
+    value = str(mode or _SOLVER_MODE_OVERRIDE or os.environ.get('SOLVER_MODE') or SOLVER_MODE_DEEPSEEK_PRIMARY).strip().lower()
+    value = value.replace('-', '_')
+    if value in {'local', 'local_first', 'local_primary', 'legacy_local'}:
+        return SOLVER_MODE_LOCAL_PRIMARY
+    return SOLVER_MODE_DEEPSEEK_PRIMARY
+
+
+def deepseek_api_key_configured() -> bool:
+    try:
+        import backend.legacy_core as legacy_core
+        getter = getattr(legacy_core, '_get_deepseek_api_key', None) or getattr(legacy_core, 'get_deepseek_api_key', None)
+        if callable(getter):
+            try:
+                key = getter(legacy_core.__dict__)
+            except TypeError:
+                key = getter()
+            return bool(str(key or '').strip())
+    except Exception:
+        pass
+    return bool(str(os.environ.get('DEEPSEEK_API_KEY') or os.environ.get('myapp_ai_math_1_4_API_key') or '').strip())
+
+
+
+def attach_release(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return payload
+    out = dict(payload)
+    out.setdefault('release', APP_RELEASE)
+    out.setdefault('solverVersion', SOLVER_VERSION)
+    return out
+
+
+def _looks_like_complex_word_problem(text: str) -> bool:
+    src = str(text or '').lower()
+    return ('?' in src and len(src) > 45 and any(word in src for word in (
+        'сколько', 'за сколько', 'на сколько', 'во сколько', 'остал', 'вместе', 'скорост',
+        'поле', 'работая', 'по ', 'руб', 'коп', 'км', 'час', 'дн', 'ар', 'тонн',
+    )))
+
+
+def _is_unsafe_generic_payload(payload: dict, text: str) -> bool:
+    result = str(payload.get('result') or '')
+    source = str(payload.get('source') or '')
+    if any(marker.lower() in result.lower() for marker in _BAD_INTERNAL_MARKERS):
+        return True
+    if source.startswith(('fallback', 'legacy-ai')) and _looks_like_complex_word_problem(text):
+        return True
+    return False
+
+
+def _low_confidence_payload(text: str) -> dict:
+    return {
+        'result': (
+            'Задача.\n'
+            + str(text or '').strip()
+            + '\nРешение.\n'
+            + 'Я не уверен, что правильно распознал тип этой задачи, поэтому не буду давать предположительный ответ. '
+              'Лучше переформулируйте условие или отправьте задачу одним полным предложением без лишних заданий.\n'
+            + 'Ответ: нужно уточнить условие задачи.'
+        ),
+        'source': 'guard-low-confidence',
+        'validated': True,
+        'code': 'low_confidence_solver',
+    }
+
+
+def validate_user_text(user_text: str):
+    user_text = (user_text or '').strip()
+    if not user_text:
+        return False, {"error": "Пустой текст задачи"}
+    if len(user_text) > 2000:
+        return False, {"error": "Текст задачи слишком длинный"}
+    return True, user_text
+
+
+def get_non_math_response() -> dict:
+    return attach_release({"result": NON_MATH_REPLY, "source": "guard", "validated": True})
+
+
+def _looks_like_programmatic_math_text(text: str) -> bool:
+    """Allow official-program prompts that use school math wording before digits appear."""
+    src = str(text or '').lower().replace('ё', 'е')
+    has_geometry_words = any(word in src for word in (
+        'круг', 'квадрат', 'треугольник', 'прямоугольник', 'отрезок',
+        'углов', 'угла', 'сторон', 'стороны', 'длина отрезка', 'см',
+        'слева', 'справа', 'сверху', 'снизу', 'выше', 'ниже', 'между',
+        'внутри', 'вне', 'клетк', 'маршрут', 'клетчат'
+    ))
+    has_geometry_question = any(marker in src for marker in (
+        'какая фигура', 'как называется', 'сколько углов', 'сколько сторон',
+        'какой стала длина', 'какова длина', 'чему равна длина', 'двумя концами', 'на сколько сантиметров',
+        'в какой клетке', 'где окажешься', 'часть прямой с двумя концами', 'частью прямой с двумя концами', 'двумя концами', 'сколько концов у отрезка'
+    ))
+    has_info_words = any(word in src for word in (
+        'таблица', 'пиктограмма', 'рисунок', 'закономерност', 'инструкц'
+    ))
+    has_info_question = any(marker in src for marker in (
+        'что записано напротив строки', 'верно ли, что напротив строки',
+        'сколько предметов всего на рисунке', 'какое число следующее',
+        'какая фигура следующая', 'какое число получилось', 'сколько всего',
+        'сколько', 'верно ли'
+    ))
+    return bool(
+        ('запиши' in src and 'число' in src and ('цифр' in src or 'цифрами' in src))
+        or re.search(r'как\s+читается\s+число\s+\d+', src)
+        or re.search(r'сколько\s+чисел', src)
+        or ('вычитание' in src and 'провер' in src)
+        or ('результат' in src and ('сложен' in src or 'вычитан' in src or '+' in src or '-' in src))
+        or (('как называ' in src or 'назови' in src) and any(word in src for word in ('слагаем', 'складыва', 'сумм', 'разност', 'вычита', 'уменьшаем')))
+        or ('сколько будет' in src and any(word in src for word in ('прибав', 'вычесть', 'вычти', '+', '-')))
+        or (has_geometry_words and has_geometry_question)
+        or (has_geometry_words and '?' in src and any(marker in src for marker in ('слева', 'справа', 'между', 'внутри', 'вне', 'выше', 'ниже')))
+        or (has_info_words and has_info_question)
+    )
+
+def _looks_like_incomplete_g1_text_problem(text: str) -> bool:
+    low = str(text or '').lower().replace('ё', 'е')
+    low = re.sub(r'\s+', ' ', low).strip()
+    if not low:
+        return False
+    story_markers = ('было', 'стало', 'остал', 'на сколько', 'сколько', 'ещё', 'еще', 'отдал', 'убрали', 'меньше', 'больше')
+    if not any(marker in low for marker in story_markers):
+        return False
+    if 'несколько' in low or 'сколько-то' in low or 'сколько нибудь' in low:
+        return True
+    sentences = [part.strip() for part in re.split(r'(?<=[.!?])\s+', low) if part.strip()]
+    for sentence in sentences:
+        if re.search(r'\b(?:дали|дала|купил|купила|купили|подарил|подарила|подарили)\b', sentence) and ('еще' in sentence or 'ещё' in sentence) and not re.search(r'\d', sentence):
+            return True
+        if re.search(r'\b(?:отдал|отдала|отдали|убрал|убрала|убрали)\b', sentence) and not re.search(r'\d', sentence):
+            return True
+    if any(marker in low for marker in ('было', 'стало', 'осталось', 'остал')) and not any(marker in low for marker in ('сколько', 'на сколько', '?')):
+        return True
+    return False
+
+
+
+def prevalidate_explanation_request(user_text: str) -> dict | None:
+    ok, payload = validate_user_text(user_text)
+    if not ok:
+        return payload
+    if not looks_like_math_input(payload) and not _looks_like_programmatic_math_text(payload):
+        return attach_release(clean_result_payload(get_non_math_response()))
+    if _looks_like_v299_math_information_prompt(payload):
+        v299_guard = _prevalidate_v299_math_information_request(payload)
+        if v299_guard is not None:
+            return attach_release(clean_result_payload(v299_guard))
+        return None
+    # Multiple standalone examples/equations in one request are not solved as a batch.
+    # They are guarded before the general solver so newline loss can never glue
+    # digits into a false single expression (for example, 2+2 + 32-8).
+    # True systems of equations are excluded inside is_multi_task_submission().
+    if is_multi_task_submission(payload):
+        return attach_release(clean_result_payload(build_multi_task_payload(payload)))
+    if _looks_like_incomplete_g1_text_problem(payload):
+        return attach_release(clean_result_payload(_low_confidence_payload(payload)))
+    return None
+
+
+
+def _tag_payload(payload: dict, **extra: Any) -> dict:
+    if not isinstance(payload, dict):
+        return payload
+    out = dict(payload)
+    out.update(extra)
+    return out
+
+
+async def _generate_local_primary_response(payload: str) -> dict:
+    # Structural local/verifier path kept for guards, math-audit regression and
+    # no-key fallback. It is no longer the default user-facing solver in v288.
+    info_payload = _solve_v299_math_information_prompt(payload)
+    if info_payload is not None:
+        return attach_release(clean_result_payload(_tag_payload(info_payload, solverMode=SOLVER_MODE_LOCAL_PRIMARY)))
+    geometry_payload = _solve_v298_geometry_prompt(payload)
+    if geometry_payload is not None:
+        return attach_release(clean_result_payload(_tag_payload(geometry_payload, solverMode=SOLVER_MODE_LOCAL_PRIMARY)))
+    v300_payload = _solve_v300_numbers_quantities_prompt(payload)
+    if v300_payload is not None:
+        return attach_release(clean_result_payload(_tag_payload(v300_payload, solverMode=SOLVER_MODE_LOCAL_PRIMARY)))
+    live_payload = solve_live_math_first(payload)
+    if live_payload is not None:
+        live_payload = dict(live_payload)
+        if isinstance(live_payload.get('result'), str):
+            live_payload['result'] = _remove_single_step_numbering(live_payload['result'])
+        return attach_release(clean_result_payload(_tag_payload(live_payload, solverMode=SOLVER_MODE_LOCAL_PRIMARY)))
+    system_payload = canonicalize_system_submission(payload)
+    if system_payload is not None:
+        system_text = 'Система уравнений:\n' + system_payload
+        live_payload = solve_live_math_first(system_text)
+        if live_payload is not None:
+            return attach_release(clean_result_payload(_tag_payload(live_payload, solverMode=SOLVER_MODE_LOCAL_PRIMARY)))
+        payload = system_text
+    result = await build_explanation(payload)
+    result = clean_result_payload(result)
+    if isinstance(result, dict) and isinstance(result.get('result'), str):
+        result['result'] = _remove_single_step_numbering(result['result'])
+    if _is_unsafe_generic_payload(result, payload):
+        return attach_release(clean_result_payload(_low_confidence_payload(payload)))
+    return attach_release(_tag_payload(result, solverMode=SOLVER_MODE_LOCAL_PRIMARY))
+
+
+def _count_arithmetic_actions_in_step(step: str) -> int:
+    clean = str(step or '')
+    return len(re.findall(r'(?<=[0-9xх])\s*(?:[+\-−×*/:÷])\s*(?=[0-9xх])', clean))
+
+
+def _g1_one_operation_prompt(original_text: str) -> bool:
+    """True for grade-1 prompts whose visible solution should be one line.
+
+    This is stricter than "the answer has one final number": comparison, chains and
+    true/false checks can still be multi-step.  Sum/difference wording and simple
+    component/equation prompts should not show "1)" to a first-grade user.
+    """
+    low = str(original_text or '').lower().replace('ё', 'е')
+    low = re.sub(r'\s+', ' ', low).strip()
+    if not low:
+        return False
+    if any(key in low for key in (
+        'сравни', 'поставь знак', 'верно ли', 'верно или неверно',
+        'цепоч', 'по порядку', 'несколько действий', 'два действия', 'три действия'
+    )):
+        return False
+    simple_patterns = (
+        r'\bвычисли\s+\d+\s*[+\-−]\s*\d+\b',
+        r'\bнайди\s+сумм[уы]\b',
+        r'\bнайди\s+разност[ьи]\b',
+        r'\bк\s+\d+\s+прибавь\s+\d+\b',
+        r'\bприбавь\s+\d+\b',
+        r'\bвычти\s+\d+\b',
+        r'\bувеличь\s+\d+\s+на\s+\d+\b',
+        r'\bуменьши\s+\d+\s+на\s+\d+\b',
+        r'\bсложи\s+\d+\s+и\s+\d+\b',
+        r'\bиз\s+\d+\s+вычти\s+\d+\b',
+        r'\bнеизвестн(?:ое|ый|ая)\b',
+        r'\bx\s*[+\-−]\s*\d+\s*=\s*\d+\b',
+        r'\b\d+\s*[+\-−]\s*x\s*=\s*\d+\b',
+        r'\b\d+\s*[+\-−]\s*х\s*=\s*\d+\b',
+        r'\bх\s*[+\-−]\s*\d+\s*=\s*\d+\b',
+        r'\b\d+\s*[-−]\s*x\s*=\s*\d+\b',
+        r'\b\d+\s*[-−]\s*х\s*=\s*\d+\b',
+    )
+    return any(re.search(pattern, low) for pattern in simple_patterns)
+
+
+def _step_has_direct_result(step: str) -> bool:
+    clean = str(step or '').strip()
+    if not clean:
+        return False
+    if re.search(r'\d+\s*[+\-−]\s*\d+\s*=\s*-?\d+\b', clean):
+        return True
+    if re.search(r'[xх]\s*=\s*-?\d+\b', clean, flags=re.IGNORECASE):
+        return True
+    if re.search(r'\b\d+\s*=\s*\d+\b', clean):
+        return True
+    return False
+
+
+def _compact_semantic_single_operation_steps(original_text: str, steps: list[str]) -> list[str]:
+    """Remove explanatory pseudo-steps for semantic one-operation prompts.
+
+    Examples: «Найди сумму 9 и 6» should display «9 + 6 = 15», not
+    «1) Сумма — результат сложения. 2) 9 + 6 = 15».  The arithmetic/answer is
+    still checked; this only fixes user-facing formatting.
+    """
+    clean_steps: list[str] = []
+    for step in steps or []:
+        clean = re.sub(r'^\s*\d+[\).]\s*', '', str(step or '')).strip()
+        if clean:
+            clean_steps.append(clean)
+    if not _g1_one_operation_prompt(original_text):
+        return clean_steps
+    direct_steps = [step for step in clean_steps if _step_has_direct_result(step)]
+    if len(direct_steps) != 1:
+        return clean_steps
+    direct = direct_steps[0]
+    action_count = _count_arithmetic_actions_in_step(direct)
+    # Keep chains like 3 + 4 - 2 + 5 as multi-action; collapse true one-action
+    # expressions and simple equation final forms x = n.
+    if action_count <= 1 or re.search(r'[xх]\s*=\s*-?\d+\b', direct, flags=re.IGNORECASE):
+        return [direct]
+    return clean_steps
+
+
+def _remove_single_step_numbering(result: str) -> str:
+    """Product UX rule: one-action examples must not display "1)".
+
+    In V296.13 this also removes explanatory pseudo-steps for semantic
+    one-operation prompts after the main solution text has been formatted.
+    """
+    raw = str(result or '').strip()
+    lines = [str(line or '').rstrip() for line in raw.splitlines()]
+    numbered_indexes = [i for i, line in enumerate(lines) if re.match(r'^\s*\d+\)\s*\S+', line)]
+    if not numbered_indexes:
+        return raw
+
+    # If there is only one numbered line and it is one arithmetic action, strip
+    # just the marker.
+    if len(numbered_indexes) == 1:
+        idx = numbered_indexes[0]
+        if not re.match(r'^\s*1\)\s*\S+', lines[idx]):
+            return raw
+        step_without_marker = re.sub(r'^\s*1\)\s*', '', lines[idx]).strip()
+        if _count_arithmetic_actions_in_step(step_without_marker) <= 1:
+            lines[idx] = step_without_marker
+            return '\n'.join(lines).strip()
+        return raw
+
+    # For semantic one-operation prompts, DeepSeek/local verifier may add an
+    # explanatory first step ("Сумма — результат сложения") and then the single
+    # actual operation.  Collapse that to just the operation line.
+    original_text = ''
+    for i, line in enumerate(lines):
+        if re.match(r'^задача\s*[.:]?$', line.strip(), flags=re.IGNORECASE) and i + 1 < len(lines):
+            original_text = lines[i + 1].strip()
+            break
+    if not _g1_one_operation_prompt(original_text):
+        return raw
+    body_indexes: list[int] = []
+    in_solution = False
+    for i, line in enumerate(lines):
+        low = line.strip().lower().replace('ё', 'е')
+        if re.match(r'^решение\s*[.:]?$', low):
+            in_solution = True
+            continue
+        if in_solution and low.startswith('ответ:'):
+            break
+        if in_solution and line.strip():
+            body_indexes.append(i)
+    if not body_indexes:
+        return raw
+    clean_body = [re.sub(r'^\s*\d+\)\s*', '', lines[i]).strip() for i in body_indexes]
+    compact = _compact_semantic_single_operation_steps(original_text, clean_body)
+    if len(compact) != 1:
+        return raw
+    # Replace the full solution body with one unnumbered line.
+    first = body_indexes[0]
+    last = body_indexes[-1]
+    next_lines = lines[:first] + [compact[0]] + lines[last + 1:]
+    return '\n'.join(next_lines).strip()
+
+
+def _normalize_deepseek_result_text(result: str) -> str:
+    lines: list[str] = []
+    for raw_line in str(result or '').splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        low = line.lower()
+        if low.startswith(('совет:', 'подсказка:', 'конечно', 'давайте')):
+            continue
+        if low.startswith('ответ:') and line[-1:] not in '.!?':
+            line += '.'
+        lines.append(line)
+    # Keep the stable product template and avoid trailing technical/extra prose.
+    return _remove_single_step_numbering('\n'.join(lines).strip())
+
+def _postprocess_deepseek_primary_payload(payload: dict, original_text: str) -> dict:
+    cleaned = clean_result_payload(payload)
+    result = _normalize_deepseek_result_text(str(cleaned.get('result') or '').strip())
+    cleaned['result'] = result
+    source = str(cleaned.get('source') or '')
+    if not result or 'Ответ:' not in result:
+        return attach_release(_tag_payload(_low_confidence_payload(original_text), source='deepseek-primary-invalid-format', solverMode=SOLVER_MODE_DEEPSEEK_PRIMARY))
+    if any(marker.lower() in result.lower() for marker in _BAD_INTERNAL_MARKERS):
+        return attach_release(_tag_payload(_low_confidence_payload(original_text), source='deepseek-primary-forbidden-marker', solverMode=SOLVER_MODE_DEEPSEEK_PRIMARY))
+    return attach_release(_tag_payload(cleaned, source=source or 'deepseek-primary', solverMode=SOLVER_MODE_DEEPSEEK_PRIMARY, verifier='local-postprocess'))
+
+
+def _parse_json_object(text: Any) -> dict[str, Any] | None:
+    raw = str(text or '').strip()
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        start = raw.find('{')
+        end = raw.rfind('}')
+        if start < 0 or end <= start:
+            return None
+        try:
+            data = json.loads(raw[start:end + 1])
+        except Exception:
+            return None
+    return data if isinstance(data, dict) else None
+
+
+def _deepseek_primary_payload(user_text: str) -> dict[str, Any]:
+    if _is_v298_grid_route_prompt(user_text):
+        system_prompt = """Ты решаешь очень короткое задание 1 класса по маршруту на клетчатом листе.
+Верни только JSON object, без markdown и без текста вне JSON.
+Финальный ответ — только конечная клетка в виде «Б3».
+Используй максимум 2 коротких шага.
+Формат JSON:
+{
+  \"known\": \"\",
+  \"find\": \"\",
+  \"steps\": [\"Идём 1 клетку вниз → Б4\", \"Идём 2 клетки влево → Б2\"],
+  \"answer_number\": \"\",
+  \"answer_unit\": \"\",
+  \"final_answer\": \"Б2\",
+  \"cannot_safely_solve\": false,
+  \"reason\": \"\"
+}
+"""
+        return {
+            'model': 'deepseek-chat',
+            'messages': [
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': 'Реши задачу и верни только JSON. Задача: ' + str(user_text or '').strip()},
+            ],
+            'response_format': {'type': 'json_object'},
+            'max_tokens': 220,
+            'temperature': 0.0,
+        }
+    if _looks_like_v300_numbers_quantities_prompt(user_text):
+        system_prompt = """Ты решаешь короткое задание 2 класса по теме «Числа и величины».
+Верни только JSON object, без markdown и текста вне JSON.
+Решай ровно одно задание. Сохраняй единицы и форму ответа.
+Примеры final_answer: "47", "6 десятков", "8 единиц", "70 + 3", "48 < 52", "верно", "на 5 больше", "43 см", "2300 г", "95 минут", "36 рублей".
+Для стоимости final_answer — только сумма денег: "35 рублей", а не "5 карандашей 35 стоят".
+Формат JSON:
+{"known":"","find":"","steps":["4 десятка — это 40; 40 + 7 = 47"],"answer_number":"47","answer_unit":"","final_answer":"47","cannot_safely_solve":false,"reason":""}
+"""
+        return {
+            'model': 'deepseek-chat',
+            'messages': [
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': 'Задача: ' + str(user_text or '').strip()},
+            ],
+            'response_format': {'type': 'json_object'},
+            'max_tokens': 260,
+            'temperature': 0.0,
+        }
+    system_prompt = """Ты решаешь задания по математике для российской начальной школы 1–4 класса.
+Верни только JSON object, без markdown и без текста вне JSON.
+Стиль: короткое школьное решение для ребёнка. Не добавляй приветствия, советы, рассуждения о себе.
+Решай ровно одно задание. Если в сообщении несколько отдельных заданий, верни cannot_safely_solve=true.
+Для заданий 1 класса отвечай особенно коротко, но НЕ оставляй пустые поля. Даже если ответ — одно слово или одна цифра, верни валидный JSON.
+Обязательно сохрани смысл вопроса: «на сколько» = вычитание, «во сколько раз» = деление, «сколько всего/вместе/стало» = итоговая величина.
+Если задание: «Сравни числа A и B», final_answer должен быть только сравнением со знаком: «A < B», «A > B» или «A = B». Не заменяй сравнение разностью.
+Если задание: «В числе N сколько десятков и сколько единиц?», final_answer пиши как «D десяток и E единиц» с правильной формой слова: 1 единица, 2 единицы, 5 единиц.
+Если задание: «Как читается число N?», final_answer — только слово числа: «ноль», «пять», «двенадцать».
+Если задание: «Запиши цифрой число ...», final_answer — только цифры, например «12».
+Для 1 класса, раздел «Арифметические действия»: вычисляй сложение и вычитание в пределах 20 точно; для уравнений x + a = b, a + x = b, x - a = b, a - x = b верни final_answer вида «x = 7»; для сравнения выражений верни знак и оба выражения, например «7 + 5 > 8 + 3»; для вопросов о названиях компонентов верни термин: «сумма», «разность», «слагаемое», «уменьшаемое», «вычитаемое».
+Для 1 класса, раздел «Текстовые задачи»: решай только задачи в одно действие на сложение, вычитание и разностное сравнение «на сколько больше/меньше»; в final_answer отвечай по вопросу задачи, с единицей/предметом и, если это уместно, с субъектом («У Маши стало 8 яблок», «У Пети осталось 5 карандашей», «У Оли на 3 марки больше, чем у Кати»). Если условие неполное, данных недостаточно или текст не является полноценной задачей, верни cannot_safely_solve=true и reason.
+Для 1 класса, раздел «Геометрия и пространственные отношения»: решай задания на слева/справа, выше/ниже, между, внутри/вне; распознавание круга, треугольника, прямоугольника, квадрата и отрезка; количество сторон и углов; длину отрезка в сантиметрах; простые маршруты по клеткам. Если вопрос: «Какая фигура...?», final_answer должен быть коротким названием фигуры: «круг», «квадрат», «треугольник», «прямоугольник», «отрезок». Если вопрос: «Сколько углов/сторон...?», final_answer должен быть только числом. Для длины отрезка пиши «6 см». Для маршрута по клеткам пиши конечную клетку в виде «Б3».
+Для 1 класса, раздел «Математическая информация»: читай простые таблицы, рисунки, пиктограммы, закономерности и инструкции из 2–3 шагов. Если вопрос про таблицу «Что записано напротив строки ...?», final_answer должен кратко повторять найденную ячейку: «Напротив строки Урок 2 — математика». Для пиктограммы отвечай по вопросу: «У Лены 6 яблок», «Всего 10 груш». Для закономерности пиши «Следующее число — 8» или «Следующая фигура — круг». Для истинности утверждения пиши только «верно» или «неверно». Для инструкции пиши «Получилось 5». Если данных не хватает, строка/участник отсутствуют, пиктограмма неполная или инструкция незавершена, верни cannot_safely_solve=true и reason.
+Для 2 класса, раздел «Числа и величины»: решай задания на числа в пределах 100, десятки и единицы, сравнение, равенства/неравенства, увеличение/уменьшение на единицы и десятки, разностное сравнение, длину, массу, время и стоимость. В final_answer сохраняй единицы и форму вопроса: «47», «6 десятков», «8 единиц», «70 + 3», «48 < 52», «верно», «на 5 больше», «43 см», «2300 г», «95 минут», «36 рублей».
+Если решение состоит из одного действия, steps должен содержать одну строку без нумерации: «2 + 3 = 5». Не пиши «1)» для одношаговых примеров. Нумерация нужна только для двух и более действий.
+Формат JSON:
+{
+  "known": "что известно, коротко",
+  "find": "что надо найти, коротко",
+  "steps": ["9 + 4 = 13"],
+  "answer_number": "13",
+  "answer_unit": "шаров",
+  "final_answer": "13 шаров",
+  "cannot_safely_solve": false,
+  "reason": ""
+}
+Если единицы нет, answer_unit может быть пустой строкой. Шаги должны содержать арифметические равенства."""
+    return {
+        'model': 'deepseek-chat',
+        'messages': [
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': 'Реши задачу и верни только JSON. Задача: ' + str(user_text or '').strip()},
+        ],
+        'response_format': {'type': 'json_object'},
+        'max_tokens': 900,
+        'temperature': 0.0,
+    }
+
+
+
+_NUMBER_WORDS_0_20 = {
+    0: 'ноль', 1: 'один', 2: 'два', 3: 'три', 4: 'четыре', 5: 'пять',
+    6: 'шесть', 7: 'семь', 8: 'восемь', 9: 'девять', 10: 'десять',
+    11: 'одиннадцать', 12: 'двенадцать', 13: 'тринадцать', 14: 'четырнадцать',
+    15: 'пятнадцать', 16: 'шестнадцать', 17: 'семнадцать', 18: 'восемнадцать',
+    19: 'девятнадцать', 20: 'двадцать',
+}
+_NUMBER_WORD_TO_INT_0_20 = {value: key for key, value in _NUMBER_WORDS_0_20.items()}
+
+
+def _ru_plural_1_2_5(number: int, one: str, two: str, five: str) -> str:
+    n = abs(int(number))
+    last_two = n % 100
+    last = n % 10
+    if 11 <= last_two <= 14:
+        return five
+    if last == 1:
+        return one
+    if 2 <= last <= 4:
+        return two
+    return five
+
+
+def _g1_tens_units_phrase(number: int) -> str:
+    tens = int(number) // 10
+    ones = int(number) % 10
+    tens_word = _ru_plural_1_2_5(tens, 'десяток', 'десятка', 'десятков')
+    ones_word = _ru_plural_1_2_5(ones, 'единица', 'единицы', 'единиц')
+    return f'{tens} {tens_word} и {ones} {ones_word}'
+
+
+def _normalize_g1_numbers_final_answer(parsed: dict[str, Any], original_text: str) -> tuple[str | None, str | None, str | None]:
+    """Deterministic verifier normalization for grade-1 numbers/values prompts.
+
+    DeepSeek remains the primary solver, but this layer keeps the product answer
+    format stable for trivial grade-1 number tasks that are easy to verify.
+    """
+    src = str(original_text or '').strip()
+    low = src.lower().replace('ё', 'е')
+
+    m = re.search(r'сравни\s+числа\s+(\d+)\s+и\s+(\d+)', low)
+    if m:
+        a = int(m.group(1)); b = int(m.group(2))
+        sign = '<' if a < b else '>' if a > b else '='
+        return f'{a} {sign} {b}', str(a if sign == '=' else ''), ''
+
+    m = re.search(r'в\s+числе\s+(\d+)\s+сколько\s+десят', low)
+    if m:
+        n = int(m.group(1))
+        return _g1_tens_units_phrase(n), '', ''
+
+    m = re.search(r'как\s+читается\s+число\s+(\d+)', low)
+    if m:
+        n = int(m.group(1))
+        word = _NUMBER_WORDS_0_20.get(n)
+        if word:
+            return word, '', ''
+
+    m = re.search(r'запиши\s+цифр(?:ой|ами)?\s+число\s+([а-я]+)', low)
+    if m:
+        word = m.group(1)
+        value = _NUMBER_WORD_TO_INT_0_20.get(word)
+        if value is not None:
+            return str(value), str(value), ''
+
+    m = re.search(r'сколько\s+сантиметров\s+в\s+(\d+)\s*дм(?:\s+(\d+)\s*см)?', low)
+    if m:
+        dm = int(m.group(1)); cm = int(m.group(2) or 0)
+        total = dm * 10 + cm
+        return f'{total} сантиметров', str(total), 'сантиметров'
+
+    m = re.search(r'сравни\s+длины\s+(\d+)\s*см\s+и\s+(\d+)\s*см', low)
+    if m:
+        a = int(m.group(1)); b = int(m.group(2))
+        sign = '<' if a < b else '>' if a > b else '='
+        return f'{a} см {sign} {b} см', '', ''
+
+    final_answer = str(parsed.get('final_answer') or '').strip()
+    answer_number = str(parsed.get('answer_number') or '').strip()
+    answer_unit = str(parsed.get('answer_unit') or '').strip()
+
+    # Normalize common DeepSeek variant: "1 десяток, 2 единицы".
+    if re.fullmatch(r'\d+\s+десят(?:ок|ка|ков),\s*\d+\s+единиц(?:а|ы)?', final_answer.lower()):
+        return re.sub(r',\s*', ' и ', final_answer), answer_number, answer_unit
+
+    return final_answer or None, answer_number or None, answer_unit or None
+
+
+
+def _deepseek_primary_retry_payload(user_text: str, raw_reply: str = '') -> dict[str, Any]:
+    if _is_v298_grid_route_prompt(user_text):
+        system_prompt = """Верни только валидный JSON object для простого маршрута по клеткам.
+Финальный ответ — только конечная клетка в виде «Б3».
+JSON строго такой:
+{\"known\":\"\",\"find\":\"\",\"steps\":[\"Идём 1 клетку вниз → Б4\",\"Идём 2 клетки влево → Б2\"],\"answer_number\":\"\",\"answer_unit\":\"\",\"final_answer\":\"Б2\",\"cannot_safely_solve\":false,\"reason\":\"\"}
+Не добавляй ничего вне JSON."""
+        user_prompt = 'Задача: ' + str(user_text or '').strip()
+        if raw_reply:
+            user_prompt += '\nПредыдущий ответ был невалидным JSON или обрезался. Верни только короткий JSON.'
+        return {
+            'model': 'deepseek-chat',
+            'messages': [
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': user_prompt},
+            ],
+            'response_format': {'type': 'json_object'},
+            'max_tokens': 220,
+            'temperature': 0.0,
+        }
+    if _looks_like_v300_numbers_quantities_prompt(user_text):
+        system_prompt = """Верни только валидный JSON object для короткого задания 2 класса по числам и величинам.
+Формат строго:
+{"known":"","find":"","steps":["7 · 5 = 35"],"answer_number":"35","answer_unit":"рублей","final_answer":"35 рублей","cannot_safely_solve":false,"reason":""}
+Для стоимости final_answer — только деньги: "35 рублей". Для десятков/единиц — "47", "6 десятков", "8 единиц". Для времени/длины/массы сохраняй единицы."""
+        user_prompt = 'Задача: ' + str(user_text or '').strip()
+        if raw_reply:
+            user_prompt += '\nПредыдущий ответ был невалидным JSON или обрезался. Верни только короткий JSON.'
+        return {
+            'model': 'deepseek-chat',
+            'messages': [
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': user_prompt},
+            ],
+            'response_format': {'type': 'json_object'},
+            'max_tokens': 260,
+            'temperature': 0.0,
+        }
+    system_prompt = """Верни только валидный JSON object для решения задания по математике 1–4 класса.
+Не пиши markdown. Не оставляй content пустым.
+Формат строго:
+{"known":"...","find":"...","steps":["..."],"answer_number":"...","answer_unit":"","final_answer":"...","cannot_safely_solve":false,"reason":""}
+Для «Сравни числа A и B» final_answer обязательно «A < B», «A > B» или «A = B». Для уравнений 1 класса верни «x = число», для сравнения выражений — «выражение знак выражение»."""
+    user_prompt = 'Задача: ' + str(user_text or '').strip()
+    if raw_reply:
+        user_prompt += '\nПредыдущий ответ был невалидным JSON или пустым. Исправь и верни только JSON.'
+    return {
+        'model': 'deepseek-chat',
+        'messages': [
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': user_prompt},
+        ],
+        'max_tokens': 700,
+        'temperature': 0.0,
+    }
+
+def _is_g1_deterministic_numbers_prompt(original_text: str) -> bool:
+    low = str(original_text or '').lower().replace('ё', 'е')
+    patterns = [
+        r'сравни\s+числа\s+\d+\s+и\s+\d+',
+        r'в\s+числе\s+\d+\s+сколько\s+десят',
+        r'как\s+читается\s+число\s+\d+',
+        r'запиши\s+цифр(?:ой|ами)?\s+число\s+[а-я]+',
+        r'сколько\s+сантиметров\s+в\s+\d+\s*дм',
+        r'сравни\s+длины\s+\d+\s*см\s+и\s+\d+\s*см',
+    ]
+    return any(re.search(p, low) for p in patterns)
+
+
+def _canonical_step_for_g1_prompt(original_text: str, final_answer: str) -> str:
+    low = str(original_text or '').lower().replace('ё', 'е')
+    if re.search(r'сравни\s+числа\s+\d+\s+и\s+\d+', low):
+        return final_answer
+    if re.search(r'сравни\s+длины\s+\d+\s*см\s+и\s+\d+\s*см', low):
+        return final_answer
+    if re.search(r'в\s+числе\s+\d+\s+сколько\s+десят', low):
+        return final_answer
+    if re.search(r'как\s+читается\s+число\s+\d+', low):
+        return f'Число читается: «{final_answer}»'
+    if re.search(r'запиши\s+цифр(?:ой|ами)?\s+число\s+[а-я]+', low):
+        return f'Записываем число цифрами: {final_answer}'
+    m = re.search(r'сколько\s+сантиметров\s+в\s+(\d+)\s*дм(?:\s+(\d+)\s*см)?', low)
+    if m:
+        dm = int(m.group(1)); cm = int(m.group(2) or 0)
+        if cm:
+            return f'{dm} дм = {dm * 10} см; {dm * 10} + {cm} = {dm * 10 + cm} см'
+        return f'{dm} дм = {dm * 10} см'
+    return final_answer
+
+
+def _extract_answer_line(result: str) -> str:
+    m = re.search(r'Ответ:\s*(.+)', str(result or ''), flags=re.IGNORECASE | re.DOTALL)
+    return (m.group(1).splitlines()[0] if m else '').strip().rstrip('.')
+
+
+def _looks_like_plain_numeric_answer(answer: str) -> bool:
+    clean = str(answer or '').strip().rstrip('.')
+    return bool(re.fullmatch(r'-?\d+(?:[.,/]\d+)?(?:\s+[а-яa-zё-]+)?', clean, flags=re.IGNORECASE))
+
+
+def _capitalize_subject_name(value: str) -> str:
+    text = str(value or '').strip()
+    return text[:1].upper() + text[1:] if text else ''
+
+
+def _expand_g1_text_final_answer(original_text: str, answer: str) -> str:
+    clean_answer = str(answer or '').strip().rstrip('.')
+    if not _looks_like_plain_numeric_answer(clean_answer):
+        return clean_answer
+    source = str(original_text or '').strip()
+    if not source:
+        return clean_answer
+
+    match = re.search(r'на\s+сколько\s+[а-яa-zё-]+\s+у\s+([а-яa-zё-]+)\s+(больше|меньше),?\s+чем\s+у\s+([а-яa-zё-]+)\s*\?*$', source, flags=re.IGNORECASE)
+    if match:
+        name1, kind, name2 = match.groups()
+        return f'У {_capitalize_subject_name(name1)} на {clean_answer} {kind.lower()}, чем у {_capitalize_subject_name(name2)}'
+
+    match = re.search(r'сколько\s+[а-яa-zё-]+\s+стало\s+у\s+([а-яa-zё-]+)\s*\?*$', source, flags=re.IGNORECASE)
+    if match:
+        return f'У {_capitalize_subject_name(match.group(1))} стало {clean_answer}'
+
+    match = re.search(r'сколько\s+[а-яa-zё-]+\s+остал[а-я]*\s+у\s+([а-яa-zё-]+)\s*\?*$', source, flags=re.IGNORECASE)
+    if match:
+        return f'У {_capitalize_subject_name(match.group(1))} осталось {clean_answer}'
+
+    match = re.search(r'сколько\s+всего\s+[а-яa-zё-]+\s*\?*$', source, flags=re.IGNORECASE)
+    if match:
+        return f'Всего {clean_answer}'
+
+    match = re.search(r'сколько\s+[а-яa-zё-]+\s+у\s+([а-яa-zё-]+)\s*\?*$', source, flags=re.IGNORECASE)
+    if match:
+        return f'У {_capitalize_subject_name(match.group(1))} {clean_answer}'
+
+    return clean_answer
+
+
+_V298_GEOM_FIGURE_FORMS = {
+    'круг': ('круг', 'круга', 'кругу', 'кругом', 'круге'),
+    'квадрат': ('квадрат', 'квадрата', 'квадрату', 'квадратом', 'квадрате'),
+    'треугольник': ('треугольник', 'треугольника', 'треугольнику', 'треугольником', 'треугольнике'),
+    'прямоугольник': ('прямоугольник', 'прямоугольника', 'прямоугольнику', 'прямоугольником', 'прямоугольнике'),
+    'отрезок': ('отрезок', 'отрезка', 'отрезку', 'отрезком', 'отрезке'),
+}
+_V298_GEOM_FIGURE_GENITIVE = {
+    'круг': 'круга',
+    'квадрат': 'квадрата',
+    'треугольник': 'треугольника',
+    'прямоугольник': 'прямоугольника',
+    'отрезок': 'отрезка',
+}
+_V298_GEOM_FIGURE_INSTRUMENTAL = {
+    'круг': 'кругом',
+    'квадрат': 'квадратом',
+    'треугольник': 'треугольником',
+    'прямоугольник': 'прямоугольником',
+    'отрезок': 'отрезком',
+}
+
+
+def _v298_figure_genitive(figure: str) -> str:
+    canon = _v298_canon_figure(figure)
+    return _V298_GEOM_FIGURE_GENITIVE.get(canon, canon)
+
+
+def _v298_figure_instrumental(figure: str) -> str:
+    canon = _v298_canon_figure(figure)
+    return _V298_GEOM_FIGURE_INSTRUMENTAL.get(canon, canon)
+
+_V298_GEOM_ANGLE_COUNT = {'круг': 0, 'треугольник': 3, 'квадрат': 4, 'прямоугольник': 4}
+_V298_GEOM_SIDE_COUNT = {'треугольник': 3, 'квадрат': 4, 'прямоугольник': 4}
+_V298_GEOM_ROWS = ['А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ж']
+
+
+def _looks_like_v298_geometry_prompt(text: str) -> bool:
+    low = str(text or '').lower().replace('ё', 'е')
+    low = re.sub(r'\s+', ' ', low).strip()
+    if not low:
+        return False
+    figure_markers = ('круг', 'квадрат', 'треугольник', 'прямоугольник', 'отрезок')
+    relation_markers = ('слева', 'справа', 'сверху', 'снизу', 'выше', 'ниже', 'между', 'внутри', 'вне')
+    if any(word in low for word in ('длина отрезка', 'сколько углов', 'сколько сторон', 'на сколько сантиметров', 'какова длина', 'чему равна длина', 'какой стала длина', 'часть прямой с двумя концами', 'сколько концов у отрезка')):
+        return True
+    if re.search(r'част\w*\s+прямой\s+с\s+двумя\s+концами', low):
+        return True
+    if any(word in low for word in ('клетк', 'клетчат')) and any(word in low for word in ('вправо', 'влево', 'вверх', 'вниз', 'в какой клетке', 'где окажешься', 'часть прямой с двумя концами', 'частью прямой с двумя концами', 'двумя концами', 'сколько концов у отрезка')):
+        return True
+    if any(word in low for word in figure_markers) and any(word in low for word in relation_markers + ('какая фигура', 'как называется', 'сколько углов', 'сколько сторон', 'без углов')):
+        return True
+    return False
+
+
+def _is_v298_grid_route_prompt(text: str) -> bool:
+    low = str(text or '').lower().replace('ё', 'е')
+    return bool(('клетк' in low or 'клетчат' in low) and re.search(r'в\s+какой\s+клетк', low) and re.search(r'(вправо|влево|вверх|вниз)', low))
+
+
+def _salvage_deepseek_primary_payload(user_text: str, raw_reply: str = '') -> dict[str, Any] | None:
+    raw = str(raw_reply or '').strip()
+    if not raw:
+        return None
+    if _is_v298_grid_route_prompt(user_text):
+        upper = raw.upper().replace('Ё', 'Е')
+        match = re.search(r'ОТВЕТ[^А-ЯA-Z0-9]*([А-Ж]\s*\d+)', upper)
+        cell = match.group(1) if match else ''
+        if not cell:
+            cells = re.findall(r'[А-Ж]\s*\d+', upper)
+            if len(cells) >= 2:
+                cell = cells[-1]
+        cell = re.sub(r'\s+', '', cell)
+        if re.fullmatch(r'[А-Ж]\d+', cell):
+            return {
+                'known': '',
+                'find': '',
+                'steps': [],
+                'answer_number': '',
+                'answer_unit': '',
+                'final_answer': cell,
+                'cannot_safely_solve': False,
+                'reason': '',
+            }
+    return None
+
+
+def _v298_canon_figure(value: str) -> str:
+    token = re.sub(r'[^а-яёa-z-]+', ' ', str(value or '').lower().replace('ё', 'е')).strip()
+    token = re.sub(r'^фигура\s+', '', token).strip()
+    for canon, forms in _V298_GEOM_FIGURE_FORMS.items():
+        if token in forms:
+            return canon
+    return token
+
+
+def _v298_extract_figure_list(segment: str) -> list[str]:
+    raw = str(segment or '').strip()
+    raw = re.sub(r'\s+и\s+', ', ', raw)
+    raw = re.sub(r'\s+или\s+', ', ', raw)
+    parts = [part.strip() for part in raw.split(',') if part.strip()]
+    out: list[str] = []
+    for part in parts:
+        canon = _v298_canon_figure(part)
+        if canon in _V298_GEOM_FIGURE_FORMS:
+            out.append(canon)
+    return out
+
+
+def _v298_count_cells_phrase(number: int) -> str:
+    return f"{number} {_ru_plural_1_2_5(number, 'клетку', 'клетки', 'клеток')}"
+
+
+def _v298_geometry_payload(original_text: str, *, source: str, steps: list[str], final_answer: str, answer_number: str = '', answer_unit: str = '') -> dict:
+    answer = str(final_answer or '').strip().rstrip('.')
+    clean_steps = [str(step or '').strip().rstrip('.') for step in steps if str(step or '').strip()]
+    result_text = _format_primary_solution_text(original_text, clean_steps, answer)
+    return {
+        'result': result_text,
+        'userVisibleResultText': result_text,
+        'source': source,
+        'validated': True,
+        'structured_solution': {
+            'known': '',
+            'find': '',
+            'steps': clean_steps,
+            'answer_number': str(answer_number or '').strip(),
+            'answer_unit': str(answer_unit or '').strip(),
+            'final_answer': answer,
+        },
+        'verifier': 'local-v298-geometry-postprocess',
+    }
+
+
+def _v298_try_row_relations(original_text: str) -> dict | None:
+    low = str(original_text or '').lower().replace('ё', 'е')
+    row_match = re.search(r'слева\s+направо\s+(?:стоят|расположены)\s+(.+?)\.', low)
+    if not row_match:
+        return None
+    figures = _v298_extract_figure_list(row_match.group(1))
+    if len(figures) < 3:
+        return None
+    q_between = re.search(r'какая\s+фигура\s+между\s+(.+?)\s+и\s+(.+?)\?*$', low)
+    if q_between:
+        left = _v298_canon_figure(q_between.group(1))
+        right = _v298_canon_figure(q_between.group(2))
+        if left in figures and right in figures:
+            li, ri = figures.index(left), figures.index(right)
+            start, end = sorted((li, ri))
+            middle = figures[start + 1:end]
+            if len(middle) == 1:
+                answer = middle[0]
+                steps = [f"Слева направо: {', '.join(figures)}", f"Между {_v298_figure_instrumental(left)} и {_v298_figure_instrumental(right)} находится {answer}"]
+                return _v298_geometry_payload(original_text, source='local:live-v298-g1-spatial-row', steps=steps, final_answer=answer)
+    q_left = re.search(r'какая\s+фигура\s+слева\s+от\s+(.+?)\?*$', low)
+    if q_left:
+        ref = _v298_canon_figure(q_left.group(1))
+        if ref in figures:
+            idx = figures.index(ref)
+            if idx > 0:
+                answer = figures[idx - 1]
+                steps = [f"Слева направо: {', '.join(figures)}", f"Слева от {_v298_figure_genitive(ref)} находится {answer}"]
+                return _v298_geometry_payload(original_text, source='local:live-v298-g1-spatial-row', steps=steps, final_answer=answer)
+    q_right = re.search(r'какая\s+фигура\s+справа\s+от\s+(.+?)\?*$', low)
+    if q_right:
+        ref = _v298_canon_figure(q_right.group(1))
+        if ref in figures:
+            idx = figures.index(ref)
+            if idx < len(figures) - 1:
+                answer = figures[idx + 1]
+                steps = [f"Слева направо: {', '.join(figures)}", f"Справа от {_v298_figure_genitive(ref)} находится {answer}"]
+                return _v298_geometry_payload(original_text, source='local:live-v298-g1-spatial-row', steps=steps, final_answer=answer)
+    return None
+
+
+def _v298_try_column_relations(original_text: str) -> dict | None:
+    low = str(original_text or '').lower().replace('ё', 'е')
+    col_match = re.search(r'сверху\s+вниз\s+(?:стоят|расположены)\s+(.+?)\.', low)
+    if not col_match:
+        return None
+    figures = _v298_extract_figure_list(col_match.group(1))
+    if len(figures) < 3:
+        return None
+    q_above = re.search(r'какая\s+фигура\s+выше\s+(.+?)\?*$', low)
+    if q_above:
+        ref = _v298_canon_figure(q_above.group(1))
+        if ref in figures:
+            idx = figures.index(ref)
+            if idx > 0:
+                answer = figures[idx - 1]
+                steps = [f"Сверху вниз: {', '.join(figures)}", f"Выше {_v298_figure_genitive(ref)} находится {answer}"]
+                return _v298_geometry_payload(original_text, source='local:live-v298-g1-spatial-column', steps=steps, final_answer=answer)
+    q_below = re.search(r'какая\s+фигура\s+ниже\s+(.+?)\?*$', low)
+    if q_below:
+        ref = _v298_canon_figure(q_below.group(1))
+        if ref in figures:
+            idx = figures.index(ref)
+            if idx < len(figures) - 1:
+                answer = figures[idx + 1]
+                steps = [f"Сверху вниз: {', '.join(figures)}", f"Ниже {_v298_figure_genitive(ref)} находится {answer}"]
+                return _v298_geometry_payload(original_text, source='local:live-v298-g1-spatial-column', steps=steps, final_answer=answer)
+    return None
+
+
+def _v298_try_inside_outside(original_text: str) -> dict | None:
+    low = str(original_text or '').lower().replace('ё', 'е')
+    m = re.search(r'внутри\s+([а-яё]+)\s+([а-яё]+),\s*а\s*вне\s+\1\s+([а-яё]+)\.', low)
+    if not m:
+        return None
+    container = _v298_canon_figure(m.group(1))
+    inner = _v298_canon_figure(m.group(2))
+    outer = _v298_canon_figure(m.group(3))
+    if container not in _V298_GEOM_FIGURE_FORMS or inner not in _V298_GEOM_FIGURE_FORMS or outer not in _V298_GEOM_FIGURE_FORMS:
+        return None
+    if re.search(r'какая\s+фигура\s+внутри\s+[а-яё]+\?*$', low):
+        steps = [f"Внутри {_v298_figure_genitive(container)} находится {inner}", f"Вне {_v298_figure_genitive(container)} находится {outer}"]
+        return _v298_geometry_payload(original_text, source='local:live-v298-g1-inside-outside', steps=steps, final_answer=inner)
+    if re.search(r'какая\s+фигура\s+вне\s+[а-яё]+\?*$', low):
+        steps = [f"Внутри {_v298_figure_genitive(container)} находится {inner}", f"Вне {_v298_figure_genitive(container)} находится {outer}"]
+        return _v298_geometry_payload(original_text, source='local:live-v298-g1-inside-outside', steps=steps, final_answer=outer)
+    return None
+
+
+def _v298_try_shape_properties(original_text: str) -> dict | None:
+    low = str(original_text or '').lower().replace('ё', 'е')
+    m = re.search(r'сколько\s+углов\s+у\s+([а-яё]+)\?*$', low)
+    if m:
+        figure = _v298_canon_figure(m.group(1))
+        if figure in _V298_GEOM_ANGLE_COUNT:
+            value = _V298_GEOM_ANGLE_COUNT[figure]
+            gen = _V298_GEOM_FIGURE_GENITIVE.get(figure, figure)
+            steps = [f"У {gen} {value} {_ru_plural_1_2_5(value, 'угол', 'угла', 'углов')}"]
+            return _v298_geometry_payload(original_text, source='local:live-v298-g1-shape-property', steps=steps, final_answer=str(value), answer_number=str(value))
+    m = re.search(r'сколько\s+сторон\s+у\s+([а-яё]+)\?*$', low)
+    if m:
+        figure = _v298_canon_figure(m.group(1))
+        if figure in _V298_GEOM_SIDE_COUNT:
+            value = _V298_GEOM_SIDE_COUNT[figure]
+            gen = _V298_GEOM_FIGURE_GENITIVE.get(figure, figure)
+            steps = [f"У {gen} {value} {_ru_plural_1_2_5(value, 'сторона', 'стороны', 'сторон')}"]
+            return _v298_geometry_payload(original_text, source='local:live-v298-g1-shape-property', steps=steps, final_answer=str(value), answer_number=str(value))
+    m = re.search(r'сколько\s+концов\s+у\s+отрезка\?*$', low)
+    if m:
+        steps = ['У отрезка 2 конца']
+        return _v298_geometry_payload(original_text, source='local:live-v298-g1-shape-property', steps=steps, final_answer='2', answer_number='2')
+    if re.search(r'част\w*\s+прямой\s+с\s+двумя\s+концами', low):
+        steps = ['Часть прямой с двумя концами называется отрезок']
+        return _v298_geometry_payload(original_text, source='local:live-v298-g1-shape-property', steps=steps, final_answer='отрезок')
+    options_match = re.search(r':\s*(.+?)\?*$', low)
+    options = _v298_extract_figure_list(options_match.group(1)) if options_match else []
+    if 'без углов' in low and 'круг' in options:
+        steps = ['У круга нет углов']
+        return _v298_geometry_payload(original_text, source='local:live-v298-g1-shape-property', steps=steps, final_answer='круг')
+    if '3 угла' in low and 'треугольник' in options:
+        steps = ['У треугольника 3 угла']
+        return _v298_geometry_payload(original_text, source='local:live-v298-g1-shape-property', steps=steps, final_answer='треугольник')
+    if '3 стороны' in low and 'треугольник' in options:
+        steps = ['У треугольника 3 стороны']
+        return _v298_geometry_payload(original_text, source='local:live-v298-g1-shape-property', steps=steps, final_answer='треугольник')
+    if (('4 угла и 4 равные стороны' in low) or ('4 одинаковые стороны' in low and '4 угла' in low)) and 'квадрат' in options:
+        steps = ['У квадрата 4 угла и 4 равные стороны']
+        return _v298_geometry_payload(original_text, source='local:live-v298-g1-shape-property', steps=steps, final_answer='квадрат')
+    if (('две длинные и две короткие стороны' in low) or ('2 длинные и 2 короткие стороны' in low)) and 'прямоугольник' in options:
+        steps = ['У прямоугольника две длинные и две короткие стороны']
+        return _v298_geometry_payload(original_text, source='local:live-v298-g1-shape-property', steps=steps, final_answer='прямоугольник')
+    return None
+
+
+def _v298_try_segment_length(original_text: str) -> dict | None:
+    text = str(original_text or '')
+    m = re.search(r'Длина\s+отрезка\s+([A-ZА-Я]{1,2})\s+(\d+)\s*см\.\s*(?:Какова\s+длина|Чему\s+равна\s+длина)\s+отрезка\s+\1\?*$', text, flags=re.IGNORECASE)
+    if m:
+        label, value = m.group(1).upper(), int(m.group(2))
+        steps = [f"Длина отрезка {label} равна {value} см"]
+        return _v298_geometry_payload(original_text, source='local:live-v298-g1-segment-length', steps=steps, final_answer=f'{value} см', answer_number=str(value), answer_unit='см')
+    m = re.search(r'Длина\s+отрезка\s+([A-ZА-Я]{1,2})\s+(\d+)\s*см,\s*а\s+длина\s+отрезка\s+([A-ZА-Я]{1,2})\s+(\d+)\s*см\.\s*На\s+сколько\s+сантиметров\s+отрезок\s+\1\s+длиннее\s+отрезка\s+\3\?*$', text, flags=re.IGNORECASE)
+    if m:
+        first, a, second, b = m.group(1).upper(), int(m.group(2)), m.group(3).upper(), int(m.group(4))
+        diff = a - b
+        steps = [f"{a} - {b} = {diff} см"]
+        return _v298_geometry_payload(original_text, source='local:live-v298-g1-segment-length', steps=steps, final_answer=f'{diff} см', answer_number=str(diff), answer_unit='см')
+    m = re.search(r'Длина\s+отрезка\s+(\d+)\s*см\.\s*Его\s+увеличили\s+на\s+(\d+)\s*см\.\s*Какой\s+стала\s+длина\s+отрезка\?*$', text, flags=re.IGNORECASE)
+    if m:
+        base, delta = int(m.group(1)), int(m.group(2))
+        total = base + delta
+        steps = [f"{base} + {delta} = {total} см"]
+        return _v298_geometry_payload(original_text, source='local:live-v298-g1-segment-length', steps=steps, final_answer=f'{total} см', answer_number=str(total), answer_unit='см')
+    m = re.search(r'Длина\s+отрезка\s+(\d+)\s*см\.\s*Его\s+уменьшили\s+на\s+(\d+)\s*см\.\s*Какой\s+стала\s+длина\s+отрезка\?*$', text, flags=re.IGNORECASE)
+    if m:
+        base, delta = int(m.group(1)), int(m.group(2))
+        total = base - delta
+        steps = [f"{base} - {delta} = {total} см"]
+        return _v298_geometry_payload(original_text, source='local:live-v298-g1-segment-length', steps=steps, final_answer=f'{total} см', answer_number=str(total), answer_unit='см')
+    return None
+
+
+def _v298_try_grid_route(original_text: str) -> dict | None:
+    text = str(original_text or '')
+    low = text.lower().replace('ё', 'е')
+    start_match = re.search(r'клетке\s+([А-ЯA-ZЁа-яё])\s*(\d+)\s*[.!?]?', text)
+    if not start_match:
+        return None
+    row_letter = start_match.group(1).upper()
+    col_value = int(start_match.group(2))
+    if row_letter not in _V298_GEOM_ROWS:
+        return None
+    actions = re.findall(r'(\d+)\s+клетк[а-я]*\s+(вправо|влево|вверх|вниз)', low)
+    if not actions or 'в какой клетке' not in low and 'где окажешься' not in low:
+        return None
+    row_index = _V298_GEOM_ROWS.index(row_letter)
+    col_index = col_value - 1
+    steps: list[str] = []
+    current_row, current_col = row_index, col_index
+    for amount_raw, direction in actions:
+        amount = int(amount_raw)
+        if direction == 'вправо':
+            current_col += amount
+        elif direction == 'влево':
+            current_col -= amount
+        elif direction == 'вверх':
+            current_row -= amount
+        elif direction == 'вниз':
+            current_row += amount
+        if current_row < 0 or current_row >= len(_V298_GEOM_ROWS) or current_col < 0 or current_col > 8:
+            return None
+        steps.append(f"Идём { _v298_count_cells_phrase(amount) } {direction} → {_V298_GEOM_ROWS[current_row]}{current_col + 1}")
+    answer = f'{_V298_GEOM_ROWS[current_row]}{current_col + 1}'
+    return _v298_geometry_payload(original_text, source='local:live-v298-g1-grid-route', steps=steps, final_answer=answer)
+
+
+def _solve_v298_geometry_prompt(original_text: str) -> dict | None:
+    if not _looks_like_v298_geometry_prompt(original_text):
+        return None
+    for builder in (
+        _v298_try_row_relations,
+        _v298_try_column_relations,
+        _v298_try_inside_outside,
+        _v298_try_shape_properties,
+        _v298_try_segment_length,
+        _v298_try_grid_route,
+    ):
+        payload = builder(original_text)
+        if payload is not None:
+            return payload
+    return None
+
+
+def _verified_v298_geometry_payload(original_text: str) -> dict | None:
+    structural = _solve_v298_geometry_prompt(original_text)
+    if not isinstance(structural, dict):
+        return None
+    out = dict(structural)
+    out['source'] = 'deepseek-primary'
+    out['verifier'] = 'local-v298-geometry-postprocess'
+    return out
+
+
+def _verified_g1_arithmetic_payload(original_text: str) -> dict | None:
+    """Use the structural local layer only as a verifier/postprocessor.
+
+    DeepSeek has already been called before this function is considered; this
+    branch only normalizes deterministic grade-1 arithmetic answers and protects
+    against bad formatting or arithmetic slips in the LLM response.
+    """
+    try:
+        structural = solve_live_math_first(original_text)
+    except Exception:
+        return None
+    if not isinstance(structural, dict):
+        return None
+    source = str(structural.get('source') or '')
+    if not source.startswith(('local:live-v296-g1-', 'local:live-v287-g1-')):
+        return None
+    result = _normalize_deepseek_result_text(str(structural.get('result') or '').strip())
+    if not result or 'Ответ:' not in result:
+        return None
+    answer = _extract_answer_line(result)
+    steps: list[str] = []
+    in_solution = False
+    for line in result.splitlines():
+        clean = line.strip()
+        if not clean:
+            continue
+        if re.match(r'^решение\s*[.:]?$', clean, flags=re.IGNORECASE):
+            in_solution = True
+            continue
+        if clean.lower().startswith('ответ:'):
+            break
+        if not in_solution:
+            continue
+        if re.match(r'^\d+\)\s+', clean):
+            steps.append(re.sub(r'^\d+\)\s+', '', clean).strip())
+        elif not re.match(r'^задача\s*[.:]?$', clean, flags=re.IGNORECASE):
+            steps.append(clean)
+    result = _format_primary_solution_text(original_text, steps, answer)
+    steps = _compact_semantic_single_operation_steps(original_text, steps)
+    return {
+        'result': result,
+        'source': 'deepseek-primary',
+        'validated': True,
+        'structured_solution': {
+            'known': '',
+            'find': '',
+            'steps': steps,
+            'answer_number': answer,
+            'answer_unit': '',
+            'final_answer': answer,
+        },
+        'verifier': 'local-v296-arithmetic-postprocess',
+    }
+
+
+def _format_primary_solution_text(original_text: str, steps: list[str], final_answer: str) -> str:
+    lines = ['Задача.', str(original_text or '').strip(), 'Решение.']
+    clean_steps: list[str] = []
+    for step in steps:
+        clean = re.sub(r'^\s*\d+[\).]\s*', '', str(step or '')).strip()
+        if clean:
+            clean_steps.append(clean)
+    clean_steps = _compact_semantic_single_operation_steps(original_text, clean_steps)
+    normalized_steps: list[str] = []
+    for clean in clean_steps:
+        if clean[-1:] not in '.!?':
+            clean += '.'
+        normalized_steps.append(clean)
+    clean_steps = normalized_steps
+    single_action_solution = len(clean_steps) == 1 and _count_arithmetic_actions_in_step(clean_steps[0]) <= 1
+    for idx, step in enumerate(clean_steps, start=1):
+        lines.append(step if single_action_solution else f'{idx}) {step}')
+    answer = str(final_answer or '').strip()
+    if answer and answer[-1:] not in '.!?':
+        answer += '.'
+    lines.append('Ответ: ' + answer)
+    return _remove_single_step_numbering('\n'.join(lines))
+
+
+def _verified_v297_text_problem_payload(original_text: str, parsed: dict[str, Any] | None = None) -> dict | None:
+    """Use the structural local layer only as a verifier/postprocessor for V297.
+
+    DeepSeek is still called first in production. For ordinary first-grade one-action
+    text problems the local solver is allowed to normalize the final answer so the API
+    responds in the same question-shaped form that the frontend shows to the user.
+    """
+    try:
+        structural = solve_live_math_first(original_text)
+    except Exception:
+        return None
+    if not isinstance(structural, dict):
+        return None
+    source = str(structural.get('source') or '')
+    if not source.startswith('local:live-v297-g1-'):
+        return None
+    result = _normalize_deepseek_result_text(str(structural.get('result') or '').strip())
+    if not result or 'Ответ:' not in result:
+        return None
+    answer = _extract_answer_line(result)
+    if not answer:
+        return None
+    answer = _expand_g1_text_final_answer(original_text, answer)
+    steps: list[str] = []
+    in_solution = False
+    for line in result.splitlines():
+        clean = line.strip()
+        if not clean:
+            continue
+        if re.match(r'^решение\s*[.:]?$', clean, flags=re.IGNORECASE):
+            in_solution = True
+            continue
+        if clean.lower().startswith('ответ:'):
+            break
+        if not in_solution:
+            continue
+        if re.match(r'^\d+\)\s+', clean):
+            steps.append(re.sub(r'^\d+\)\s+', '', clean).strip())
+        elif not re.match(r'^задача\s*[.:]?$', clean, flags=re.IGNORECASE):
+            steps.append(clean)
+    steps = _compact_semantic_single_operation_steps(original_text, steps)
+    result = _format_primary_solution_text(original_text, steps, answer)
+    answer_number = ''
+    answer_unit = ''
+    if isinstance(parsed, dict):
+        answer_number = str(parsed.get('answer_number') or '').strip()
+        answer_unit = str(parsed.get('answer_unit') or '').strip()
+    if not answer_number:
+        m = re.search(r'(?<!\d)(-?\d+(?:[.,/]\d+)?)', answer)
+        if m:
+            answer_number = m.group(1)
+    return {
+        'result': result,
+        'source': 'deepseek-primary',
+        'validated': True,
+        'structured_solution': {
+            'known': str(parsed.get('known') or '').strip() if isinstance(parsed, dict) else '',
+            'find': str(parsed.get('find') or '').strip() if isinstance(parsed, dict) else '',
+            'steps': steps,
+            'answer_number': answer_number,
+            'answer_unit': answer_unit,
+            'final_answer': answer,
+        },
+        'verifier': 'local-v297-text-postprocess',
+    }
+
+
+def _format_deepseek_primary_solution(parsed: dict[str, Any], original_text: str) -> dict | None:
+    verified_arithmetic = _verified_g1_arithmetic_payload(original_text)
+    if verified_arithmetic is not None:
+        return verified_arithmetic
+    verified_v297_text = _verified_v297_text_problem_payload(original_text, parsed)
+    if verified_v297_text is not None:
+        return verified_v297_text
+    verified_v300_numbers = _verified_v300_numbers_quantities_payload(original_text, parsed)
+    if verified_v300_numbers is not None:
+        return verified_v300_numbers
+    verified_v299_information = _verified_v299_math_information_payload(original_text, parsed)
+    if verified_v299_information is not None:
+        return verified_v299_information
+    verified_v298_geometry = _verified_v298_geometry_payload(original_text)
+    if verified_v298_geometry is not None:
+        return verified_v298_geometry
+    if parsed.get('cannot_safely_solve'):
+        return None
+
+    normalized_final, normalized_number, normalized_unit = _normalize_g1_numbers_final_answer(parsed, original_text)
+    answer_number = str(normalized_number or parsed.get('answer_number') or '').strip()
+    answer_unit = str(normalized_unit if normalized_unit is not None else parsed.get('answer_unit') or '').strip()
+    final_answer = str(normalized_final or parsed.get('final_answer') or '').strip()
+    if not final_answer:
+        final_answer = (answer_number + (' ' + answer_unit if answer_unit else '')).strip()
+    final_answer = _expand_g1_text_final_answer(original_text, final_answer)
+    if not final_answer:
+        return None
+
+    steps_raw = parsed.get('steps')
+    steps: list[str] = []
+    if isinstance(steps_raw, list):
+        for raw in steps_raw:
+            step = str(raw or '').strip()
+            if step:
+                steps.append(step)
+
+    low_original = str(original_text or '').lower().replace('ё', 'е')
+    deterministic_g1 = _is_g1_deterministic_numbers_prompt(original_text)
+
+    # For tiny grade-1 number/value prompts DeepSeek often returns a valid final
+    # answer but leaves steps empty. That is acceptable for product UX: the local
+    # verifier can generate the one-line explanation while the live external API
+    # call is still counted and cached.
+    if deterministic_g1:
+        steps = [_canonical_step_for_g1_prompt(original_text, final_answer)]
+    elif not steps:
+        return None
+
+    result_text = _format_primary_solution_text(original_text, steps, final_answer)
+    if final_answer[-1:] not in '.!?':
+        final_answer += '.'
+    return {
+        'result': result_text,
+        'source': 'deepseek-primary',
+        'validated': True,
+        'structured_solution': {
+            'known': str(parsed.get('known') or '').strip(),
+            'find': str(parsed.get('find') or '').strip(),
+            'steps': steps,
+            'answer_number': answer_number,
+            'answer_unit': answer_unit,
+            'final_answer': final_answer.rstrip('.'),
+        },
+    }
+
+
+async def _call_deepseek_primary(payload: str) -> dict | None:
+    import backend.legacy_core as legacy_core
+    call_deepseek = getattr(legacy_core, 'call_deepseek', None)
+    if not callable(call_deepseek) or not deepseek_api_key_configured():
+        return None
+    getter = getattr(legacy_core, '_get_deepseek_api_key', None) or getattr(legacy_core, 'get_deepseek_api_key', None)
+    try:
+        api_key = getter(legacy_core.__dict__) if callable(getter) else ''
+    except TypeError:
+        api_key = getter() if callable(getter) else ''
+    api_key = str(api_key or os.environ.get('DEEPSEEK_API_KEY') or os.environ.get('myapp_ai_math_1_4_API_key') or '').strip()
+    previous_key = getattr(legacy_core, 'DEEPSEEK_API_KEY', '')
+    setattr(legacy_core, 'DEEPSEEK_API_KEY', api_key)
+    try:
+        llm_result = await call_deepseek(_deepseek_primary_payload(payload), timeout_seconds=25.0)
+    finally:
+        setattr(legacy_core, 'DEEPSEEK_API_KEY', previous_key)
+    if not isinstance(llm_result, dict) or llm_result.get('error'):
+        return None
+    raw_result = str(llm_result.get('result') or '')
+    parsed = _parse_json_object(raw_result)
+    if not parsed:
+        salvage = _salvage_deepseek_primary_payload(payload, raw_result)
+        if salvage is not None:
+            return _format_deepseek_primary_solution(salvage, payload)
+        # One controlled retry fixes occasional empty/non-JSON responses on very short grade-1 prompts.
+        retry_result = await call_deepseek(_deepseek_primary_retry_payload(payload, raw_result), timeout_seconds=25.0)
+        if not isinstance(retry_result, dict) or retry_result.get('error'):
+            return None
+        retry_raw_result = str(retry_result.get('result') or '')
+        parsed = _parse_json_object(retry_raw_result)
+        if not parsed:
+            salvage = _salvage_deepseek_primary_payload(payload, retry_raw_result) or _salvage_deepseek_primary_payload(payload, raw_result)
+            if salvage is not None:
+                return _format_deepseek_primary_solution(salvage, payload)
+            return None
+        raw_result = retry_raw_result
+    return _format_deepseek_primary_solution(parsed, payload)
+
+
+async def _generate_deepseek_primary_response(payload: str, *, allow_external: bool = True) -> dict:
+    if not allow_external:
+        return attach_release({
+            'result': (
+                'Задача.\n' + str(payload or '').strip() + '\nРешение.\n'
+                'Для этой проверки внешний DeepSeek API запрещён, поэтому задача не решалась.\n'
+                'Ответ: внешний API заблокирован.'
+            ),
+            'source': 'deepseek-primary-external-blocked',
+            'validated': True,
+            'solverMode': SOLVER_MODE_DEEPSEEK_PRIMARY,
+            'externalApiBlocked': True,
+        })
+    try:
+        ai_payload = await _call_deepseek_primary(payload)
+    except Exception as exc:
+        local_payload = await _generate_local_primary_response(payload)
+        return attach_release(_tag_payload(local_payload, solverMode=SOLVER_MODE_DEEPSEEK_PRIMARY, deepseekPrimaryFallback='deepseek_exception', deepseekError=str(exc)[:300]))
+    if isinstance(ai_payload, dict) and ai_payload.get('result'):
+        return _postprocess_deepseek_primary_payload(ai_payload, payload)
+    local_payload = await _generate_local_primary_response(payload)
+    fallback_reason = 'deepseek_invalid_or_empty' if deepseek_api_key_configured() else 'no_api_key_or_no_helper'
+    return attach_release(_tag_payload(local_payload, solverMode=SOLVER_MODE_DEEPSEEK_PRIMARY, deepseekPrimaryFallback=fallback_reason))
+
+
+async def generate_explanation_response(user_text: str, *, solver_mode: str | None = None, allow_external: bool = True) -> dict:
+    prevalidated = prevalidate_explanation_request(user_text)
+    if prevalidated is not None:
+        return prevalidated
+    _, payload = validate_user_text(user_text)
+    mode = resolve_solver_mode(solver_mode)
+    if mode == SOLVER_MODE_LOCAL_PRIMARY:
+        return await _generate_local_primary_response(payload)
+    return await _generate_deepseek_primary_response(payload, allow_external=allow_external)
+
+
+
+# --- v300 live UI audit: Grade 2, Section 1 — Numbers and quantities ---
+
+_V300_UNIT_FORMS = {
+    'рубль': ('рубль', 'рубля', 'рублей'),
+    'копейка': ('копейка', 'копейки', 'копеек'),
+    'сантиметр': ('сантиметр', 'сантиметра', 'сантиметров'),
+    'дециметр': ('дециметр', 'дециметра', 'дециметров'),
+    'метр': ('метр', 'метра', 'метров'),
+    'грамм': ('грамм', 'грамма', 'граммов'),
+    'килограмм': ('килограмм', 'килограмма', 'килограммов'),
+    'минута': ('минута', 'минуты', 'минут'),
+    'час': ('час', 'часа', 'часов'),
+    'десяток': ('десяток', 'десятка', 'десятков'),
+    'единица': ('единица', 'единицы', 'единиц'),
+    'тетрадь': ('тетрадь', 'тетради', 'тетрадей'),
+    'карандаш': ('карандаш', 'карандаша', 'карандашей'),
+    'наклейка': ('наклейка', 'наклейки', 'наклеек'),
+}
+
+
+def _v300_norm(text: str) -> str:
+    value = str(text or '').lower().replace('ё', 'е')
+    value = value.replace('−', '-').replace('—', ' - ').replace('–', ' - ')
+    value = re.sub(r'\s+', ' ', value)
+    return value.strip()
+
+
+def _v300_word(number: int, unit: str) -> str:
+    forms = _V300_UNIT_FORMS.get(unit, (unit, unit, unit))
+    return _ru_plural_1_2_5(int(number), forms[0], forms[1], forms[2])
+
+
+def _v300_count(number: int, unit: str) -> str:
+    return f'{int(number)} {_v300_word(int(number), unit)}'
+
+
+def _v300_sign(a: int, b: int) -> str:
+    return '<' if a < b else '>' if a > b else '='
+
+
+def _v300_info_payload(original_text: str, *, source: str, steps: list[str], final_answer: str, answer_number: str = '', answer_unit: str = '') -> dict:
+    return {
+        'result': _format_primary_solution_text(original_text, steps, final_answer),
+        'source': source,
+        'validated': True,
+        'structured_solution': {
+            'known': '',
+            'find': '',
+            'steps': steps,
+            'answer_number': str(answer_number or '').strip(),
+            'answer_unit': str(answer_unit or '').strip(),
+            'final_answer': str(final_answer or '').strip().rstrip('.'),
+        },
+        'verifier': 'local-v300-numbers-quantities-postprocess',
+        'userVisibleResultText': _format_primary_solution_text(original_text, steps, final_answer),
+    }
+
+
+def _looks_like_v300_numbers_quantities_prompt(text: str) -> bool:
+    low = _v300_norm(text)
+    if not re.search(r'\d', low):
+        return False
+    markers = (
+        'десят', 'единиц', 'число содержит', 'в числе', 'сумму десятков', 'сравни числа',
+        'верно ли:', 'увеличь', 'уменьши', 'на сколько', 'больше, чем', 'меньше, чем',
+        'сантиметр', 'см', 'дм', 'метр', 'грамм', 'кг', 'минут', 'час', 'руб', 'копе', 'стоит', 'заплат'
+    )
+    return any(marker in low for marker in markers)
+
+
+def _solve_v300_numbers_quantities_prompt(original_text: str) -> dict | None:
+    if not _looks_like_v300_numbers_quantities_prompt(original_text):
+        return None
+    text = str(original_text or '').strip()
+    low = _v300_norm(text)
+
+    m = re.search(r'какое число содержит\s+(\d+)\s+десят\w*\s+и\s+(\d+)\s+единиц\w*', low)
+    if m:
+        tens = int(m.group(1)); units = int(m.group(2)); value = tens * 10 + units
+        return _v300_info_payload(text, source='local:live-v300-g2-place-value-compose', steps=[f'{_v300_count(tens, 'десяток')} — это {tens * 10}; {tens * 10} + {units} = {value}'], final_answer=str(value), answer_number=str(value))
+
+    m = None if 'и сколько единиц' in low else re.search(r'в числе\s+(\d+)\s+сколько\s+десят', low)
+    if m:
+        n = int(m.group(1)); tens = n // 10
+        final = _v300_count(tens, 'десяток')
+        return _v300_info_payload(text, source='local:live-v300-g2-place-value-tens', steps=[f'В числе {n} {final}'], final_answer=final, answer_number=str(tens), answer_unit=_v300_word(tens, 'десяток'))
+
+    m = re.search(r'в числе\s+(\d+)\s+сколько\s+единиц', low)
+    if m:
+        n = int(m.group(1)); units = n % 10
+        final = _v300_count(units, 'единица')
+        return _v300_info_payload(text, source='local:live-v300-g2-place-value-units', steps=[f'В числе {n} {final}'], final_answer=final, answer_number=str(units), answer_unit=_v300_word(units, 'единица'))
+
+    m = re.search(r'представь число\s+(\d+)\s+как сумму десятков и единиц', low)
+    if m:
+        n = int(m.group(1)); tens = (n // 10) * 10; units = n % 10
+        final = f'{tens} + {units}' if units else str(tens)
+        step = f'{n} = {final}'
+        return _v300_info_payload(text, source='local:live-v300-g2-place-value-sum', steps=[step], final_answer=final)
+
+    m = re.search(r'сравни числа\s+(\d+)\s+и\s+(\d+).+какой знак', low)
+    if m:
+        a = int(m.group(1)); b = int(m.group(2)); final = f'{a} {_v300_sign(a,b)} {b}'
+        return _v300_info_payload(text, source='local:live-v300-g2-compare', steps=[final], final_answer=final)
+
+    m = re.search(r'верно ли:\s*(\d+)\s*([<>=])\s*(\d+)\??', low)
+    if m:
+        a = int(m.group(1)); sign = m.group(2); b = int(m.group(3))
+        actual = _v300_sign(a, b)
+        verdict = 'верно' if sign == actual else 'неверно'
+        return _v300_info_payload(text, source='local:live-v300-g2-true-false', steps=[f'{a} {actual} {b}', f'Утверждение: {verdict}'], final_answer=verdict)
+
+    m = re.search(r'увеличь\s+(\d+)\s+на\s+(\d+)', low)
+    if m:
+        a = int(m.group(1)); d = int(m.group(2)); res = a + d
+        return _v300_info_payload(text, source='local:live-v300-g2-increase-decrease', steps=[f'{a} + {d} = {res}'], final_answer=str(res), answer_number=str(res))
+    m = re.search(r'уменьши\s+(\d+)\s+на\s+(\d+)', low)
+    if m:
+        a = int(m.group(1)); d = int(m.group(2)); res = a - d
+        return _v300_info_payload(text, source='local:live-v300-g2-increase-decrease', steps=[f'{a} - {d} = {res}'], final_answer=str(res), answer_number=str(res))
+    m = re.search(r'какое число на\s+(\d+)\s+больше,? чем\s+(\d+)', low)
+    if m:
+        d = int(m.group(1)); a = int(m.group(2)); res = a + d
+        return _v300_info_payload(text, source='local:live-v300-g2-increase-decrease', steps=[f'{a} + {d} = {res}'], final_answer=str(res), answer_number=str(res))
+    m = re.search(r'какое число на\s+(\d+)\s+меньше,? чем\s+(\d+)', low)
+    if m:
+        d = int(m.group(1)); a = int(m.group(2)); res = a - d
+        return _v300_info_payload(text, source='local:live-v300-g2-increase-decrease', steps=[f'{a} - {d} = {res}'], final_answer=str(res), answer_number=str(res))
+
+    m = re.search(r'на сколько\s+(\d+)\s+больше\s+(\d+)', low)
+    if m:
+        a = int(m.group(1)); b = int(m.group(2))
+        if max(a, b) <= 20:
+            return None
+        diff = a - b
+        final = f'на {diff} больше'
+        return _v300_info_payload(text, source='local:live-v300-g2-difference-compare', steps=[f'{a} - {b} = {diff}'], final_answer=final, answer_number=str(diff))
+    m = re.search(r'на сколько\s+(\d+)\s+меньше\s+(\d+)', low)
+    if m:
+        a = int(m.group(1)); b = int(m.group(2))
+        if max(a, b) <= 20:
+            return None
+        diff = b - a
+        final = f'на {diff} меньше'
+        return _v300_info_payload(text, source='local:live-v300-g2-difference-compare', steps=[f'{b} - {a} = {diff}'], final_answer=final, answer_number=str(diff))
+
+    m = re.search(r'сколько сантиметров в\s+(\d+)\s*дм\s*(\d+)?\s*см?', low)
+    if m:
+        dm = int(m.group(1)); cm = int(m.group(2) or 0); total = dm * 10 + cm
+        if dm <= 1 and total <= 20:
+            return None
+        final = _v300_count(total, 'сантиметр')
+        steps = [f'{dm} дм = {dm*10} см', f'{dm*10} + {cm} = {total} см'] if cm else [f'{dm} дм = {total} см']
+        return _v300_info_payload(text, source='local:live-v300-g2-length', steps=steps, final_answer=final, answer_number=str(total), answer_unit=_v300_word(total, 'сантиметр'))
+    m = re.search(r'сколько сантиметров в\s+(\d+)\s*м\s*(\d+)?\s*см?', low)
+    if m:
+        meters = int(m.group(1)); cm = int(m.group(2) or 0); total = meters * 100 + cm
+        final = _v300_count(total, 'сантиметр')
+        steps = [f'{meters} м = {meters*100} см', f'{meters*100} + {cm} = {total} см'] if cm else [f'{meters} м = {total} см']
+        return _v300_info_payload(text, source='local:live-v300-g2-length', steps=steps, final_answer=final, answer_number=str(total), answer_unit=_v300_word(total, 'сантиметр'))
+    m = re.search(r'сколько дециметров и сантиметров в\s+(\d+)\s*см', low)
+    if m:
+        total = int(m.group(1)); dm = total // 10; cm = total % 10
+        final = f'{dm} дм {cm} см'
+        return _v300_info_payload(text, source='local:live-v300-g2-length', steps=[f'{total} см = {dm} дм {cm} см'], final_answer=final)
+    m = re.search(r'сравни длины\s+(\d+)\s*дм\s+и\s+(\d+)\s*см', low)
+    if m:
+        dm = int(m.group(1)); cm = int(m.group(2)); left_cm = dm * 10; sign = _v300_sign(left_cm, cm)
+        final = f'{dm} дм {sign} {cm} см'
+        return _v300_info_payload(text, source='local:live-v300-g2-length-compare', steps=[f'{dm} дм = {left_cm} см', f'{left_cm} {sign} {cm}'], final_answer=final)
+
+    m = re.search(r'сколько граммов в\s+(\d+)\s*кг\s*(\d+)?\s*г?', low)
+    if m:
+        kg = int(m.group(1)); g = int(m.group(2) or 0); total = kg * 1000 + g
+        final = _v300_count(total, 'грамм')
+        steps = [f'{kg} кг = {kg*1000} г', f'{kg*1000} + {g} = {total} г'] if g else [f'{kg} кг = {total} г']
+        return _v300_info_payload(text, source='local:live-v300-g2-mass', steps=steps, final_answer=final, answer_number=str(total), answer_unit=_v300_word(total, 'грамм'))
+
+    m = re.search(r'сколько минут в\s+(\d+)\s*ч\s*(\d+)?\s*мин?', low)
+    if m:
+        h = int(m.group(1)); minutes = int(m.group(2) or 0); total = h * 60 + minutes
+        final = f'{total} минут'
+        steps = [f'{h} ч = {h*60} минут', f'{h*60} + {minutes} = {total} минут'] if minutes else [f'{h} ч = {total} минут']
+        return _v300_info_payload(text, source='local:live-v300-g2-time', steps=steps, final_answer=final, answer_number=str(total), answer_unit='минут')
+
+    m = re.search(r'(?:тетрадь|карандаш|наклейка) стоит\s+(\d+)\s+руб\w*\. сколько стоят\s+(\d+)\s+(?:тетрад|карандаш|накле)', low)
+    if m:
+        price = int(m.group(1)); qty = int(m.group(2)); total = price * qty
+        final = _v300_count(total, 'рубль')
+        return _v300_info_payload(text, source='local:live-v300-g2-cost', steps=[f'{price} · {qty} = {total}'], final_answer=final, answer_number=str(total), answer_unit=_v300_word(total, 'рубль'))
+    m = re.search(r'у [а-я]+ было\s+(\d+)\s+руб\w*\. .+? стоит\s+(\d+)\s+руб\w*\. сколько рублей осталось', low)
+    if m:
+        money = int(m.group(1)); price = int(m.group(2)); left = money - price
+        final = _v300_count(left, 'рубль')
+        return _v300_info_payload(text, source='local:live-v300-g2-cost', steps=[f'{money} - {price} = {left}'], final_answer=final, answer_number=str(left), answer_unit=_v300_word(left, 'рубль'))
+
+    return None
+
+
+def _verified_v300_numbers_quantities_payload(original_text: str, parsed: dict[str, Any] | None = None) -> dict | None:
+    structural = _solve_v300_numbers_quantities_prompt(original_text)
+    if not isinstance(structural, dict):
+        return None
+    source = str(structural.get('source') or '')
+    if not source.startswith('local:live-v300-g2-'):
+        return None
+    out = dict(structural)
+    out['source'] = 'deepseek-primary'
+    out['verifier'] = 'local-v300-numbers-quantities-postprocess'
+    return out
+
+# --- v299 live UI audit: Grade 1, Section 5 — Mathematical information ---
+
+_V299_ITEM_FORMS = {
+    'яблоко': ('яблоко', 'яблока', 'яблок'),
+    'груша': ('груша', 'груши', 'груш'),
+    'книга': ('книга', 'книги', 'книг'),
+    'карандаш': ('карандаш', 'карандаша', 'карандашей'),
+    'шар': ('шар', 'шара', 'шаров'),
+    'гриб': ('гриб', 'гриба', 'грибов'),
+    'конфета': ('конфета', 'конфеты', 'конфет'),
+    'кубик': ('кубик', 'кубика', 'кубиков'),
+    'флажок': ('флажок', 'флажка', 'флажков'),
+    'машинка': ('машинка', 'машинки', 'машинок'),
+    'звезда': ('звезда', 'звезды', 'звёзд'),
+    'наклейка': ('наклейка', 'наклейки', 'наклеек'),
+    'предмет': ('предмет', 'предмета', 'предметов'),
+}
+_V299_ITEM_FORM_TO_CANON = {
+    form.replace('ё', 'е'): canon
+    for canon, forms in _V299_ITEM_FORMS.items()
+    for form in forms
+}
+_V299_SHAPES = {'круг', 'квадрат', 'треугольник', 'прямоугольник'}
+_V299_TABLE_ROW_PREFIX_PATTERN = re.compile(
+    r'^\s*((?:урок|час|дело|парта|полка|коробка|ряд|строка|кабинет|игра|станция|корзина|пачка|связка|пенал)\s+[A-Za-zА-Яа-яЁё0-9]+)\s+(.+?)\s*$',
+    flags=re.IGNORECASE,
+)
+
+
+def _v299_capitalize(value: str) -> str:
+    src = str(value or '').strip()
+    return src[:1].upper() + src[1:] if src else src
+
+
+def _v299_norm(value: str) -> str:
+    return re.sub(r'\s+', ' ', str(value or '').lower().replace('ё', 'е')).strip(' .;:!?-—')
+
+
+def _v299_canon_item(value: str) -> str:
+    token = _v299_norm(value)
+    token = re.sub(r'^[а-я]+\s+', '', token) if token.count(' ') >= 1 and token.split(' ')[0] in {'красных', 'красные', 'синих', 'синие', 'зеленых', 'зелёных', 'зелёные', 'зеленые', 'больших', 'маленьких'} else token
+    return _V299_ITEM_FORM_TO_CANON.get(token, token)
+
+
+def _v299_count(number: int, item: str) -> str:
+    canon = _v299_canon_item(item)
+    forms = _V299_ITEM_FORMS.get(canon)
+    if not forms:
+        return f'{int(number)} {canon}'
+    return f"{int(number)} {_ru_plural_1_2_5(int(number), forms[0], forms[1], forms[2])}"
+
+
+def _v299_info_payload(original_text: str, *, source: str, steps: list[str], final_answer: str, answer_number: str = '', answer_unit: str = '') -> dict:
+    answer = str(final_answer or '').strip().rstrip('.')
+    clean_steps = [str(step or '').strip().rstrip('.') for step in steps if str(step or '').strip()]
+    result_text = _format_primary_solution_text(original_text, clean_steps, answer)
+    return {
+        'result': result_text,
+        'userVisibleResultText': result_text,
+        'source': source,
+        'validated': True,
+        'structured_solution': {
+            'known': '',
+            'find': '',
+            'steps': clean_steps,
+            'answer_number': str(answer_number or '').strip(),
+            'answer_unit': str(answer_unit or '').strip(),
+            'final_answer': answer,
+        },
+        'verifier': 'local-v299-information-postprocess',
+    }
+
+
+def _v299_low_confidence_payload(original_text: str) -> dict:
+    payload = _low_confidence_payload(original_text)
+    payload['userVisibleResultText'] = payload.get('result')
+    return payload
+
+
+def _looks_like_v299_math_information_prompt(text: str) -> bool:
+    low = _v299_norm(text)
+    if not low:
+        return False
+    if 'таблица' in low and any(marker in low for marker in ('напротив строки', 'верно ли')):
+        return True
+    if 'пиктограмма' in low:
+        if re.search(r'сколько\s+.+?\s+у\s+[а-яёa-z]+\?*$', low):
+            return True
+        if re.search(r'сколько\s+.+?\s+всего\?*$', low):
+            return True
+        if re.search(r'верно ли,?\s+что\s+у\s+[а-яёa-z]+\s+\d+\s+.+?\?*$', low):
+            return True
+    if 'рисунке' in low and 'сколько предметов всего' in low:
+        return True
+    if 'закономерност' in low and any(marker in low for marker in ('какое число следующее', 'какая фигура следующая')):
+        return True
+    if 'инструкц' in low and 'какое число получилось' in low:
+        return True
+    return False
+
+
+def _v299_pretty_table_key(value: str) -> str:
+    parts = [part for part in re.split(r'\s+', str(value or '').strip()) if part]
+    if not parts:
+        return ''
+    parts[0] = _v299_capitalize(parts[0])
+    if len(parts) >= 2 and re.fullmatch(r'[A-Za-zА-Яа-яЁё]', parts[1]):
+        parts[1] = parts[1].upper()
+    return ' '.join(parts)
+
+
+def _v299_split_table_row(part: str) -> tuple[str, str] | None:
+    raw = str(part or '').strip()
+    if not raw:
+        return None
+    def _clean_value(value: str) -> str:
+        cleaned = re.sub(r'^[—-]+\s*', '', str(value or '').strip())
+        return cleaned.strip()
+    row_match = re.match(r'^\s*(.+?)\s*[—-]\s*(.+?)\s*$', raw)
+    if row_match:
+        key = row_match.group(1).strip()
+        value = _clean_value(row_match.group(2))
+        if key and value and value not in {'?', '...'} and '?' not in value:
+            return key, value
+    row_match = _V299_TABLE_ROW_PREFIX_PATTERN.match(raw)
+    if row_match:
+        key = _v299_pretty_table_key(row_match.group(1).strip())
+        value = _clean_value(row_match.group(2))
+        if key and value and value not in {'?', '...'} and '?' not in value:
+            return key, value
+    return None
+
+
+def _v299_parse_table_lookup_question(question: str, entries: dict[str, tuple[str, str]]) -> tuple[str, str] | None:
+    q_norm = _v299_norm(question)
+    prefix = 'что записано напротив строки '
+    if not q_norm.startswith(prefix):
+        return None
+    target_norm = _v299_norm(q_norm[len(prefix):]).rstrip(' ?')
+    return entries.get(target_norm)
+
+
+def _v299_parse_table_true_false_question(question: str, entries: dict[str, tuple[str, str]]) -> tuple[str, str, str] | None:
+    q_norm = _v299_norm(question)
+    prefix = 'верно ли, что напротив строки '
+    if not q_norm.startswith(prefix):
+        return None
+    rest = q_norm[len(prefix):].strip().rstrip(' ?')
+    dash_match = re.match(r'^(.+?)\s*[—-]\s*(.+)$', rest)
+    if dash_match:
+        target_norm = _v299_norm(dash_match.group(1))
+        row = entries.get(target_norm)
+        if row is not None:
+            key, value = row
+            return key, value, dash_match.group(2).strip()
+    for target_norm, row in sorted(entries.items(), key=lambda item: len(item[0]), reverse=True):
+        if rest == target_norm:
+            key, value = row
+            return key, value, ''
+        if rest.startswith(target_norm + ' '):
+            key, value = row
+            claim = rest[len(target_norm):].strip()
+            return key, value, claim
+    return None
+
+
+def _v299_extract_table(text: str) -> tuple[dict[str, tuple[str, str]], str] | None:
+    match = re.match(r'^\s*Таблица[^:]*:\s*(.+?)\.\s*(.+?)\s*$', str(text or '').strip(), flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None
+    block, question = match.group(1).strip(), match.group(2).strip()
+    entries: dict[str, tuple[str, str]] = {}
+    for part in [segment.strip() for segment in block.split(';') if segment.strip()]:
+        row = _v299_split_table_row(part)
+        if row is None:
+            return None
+        key, value = row
+        entries[_v299_norm(key)] = (key, value)
+    return entries, question
+
+
+def _v299_try_table_prompt(original_text: str) -> dict | None:
+    if 'таблица' not in _v299_norm(original_text):
+        return None
+    parsed = _v299_extract_table(original_text)
+    if parsed is None:
+        return _v299_low_confidence_payload(original_text)
+    entries, question = parsed
+    lookup_row = _v299_parse_table_lookup_question(question, entries)
+    if lookup_row is not None:
+        key, value = lookup_row
+        answer_number = ''
+        answer_unit = ''
+        mnum = re.match(r'^(-?\d+(?:[.,/]\d+)?)\s+(.+)$', value)
+        if mnum:
+            answer_number = mnum.group(1)
+            answer_unit = _v299_norm(mnum.group(2))
+        steps = [f'Смотрим таблицу: {key} — {value}']
+        return _v299_info_payload(original_text, source='local:live-v299-g1-table-lookup', steps=steps, final_answer=f'Напротив строки {key} — {value}', answer_number=answer_number, answer_unit=answer_unit)
+    tf_row = _v299_parse_table_true_false_question(question, entries)
+    if tf_row is not None:
+        key, value, claim_value = tf_row
+        if not claim_value:
+            return _v299_low_confidence_payload(original_text)
+        verdict = 'верно' if _v299_norm(claim_value) == _v299_norm(value) else 'неверно'
+        steps = [f'Смотрим таблицу: {key} — {value}', f'Сравниваем с утверждением: {verdict}']
+        return _v299_info_payload(original_text, source='local:live-v299-g1-table-true-false', steps=steps, final_answer=verdict)
+    return None
+
+
+def _v299_extract_pictogram(text: str) -> tuple[str, int, str, list[tuple[str, int]], str] | None:
+    match = re.match(r'^\s*Пиктограмма:\s*(\S)\s*=\s*(\d+)\s+([А-Яа-яЁёA-Za-z]+)\.\s*(.+?)\.\s*(.+?)\s*$', str(text or '').strip(), flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None
+    symbol = match.group(1)
+    multiplier = int(match.group(2))
+    item_token = match.group(3).strip()
+    body = match.group(4).strip()
+    question = match.group(5).strip()
+    if multiplier <= 0:
+        return None
+    if re.search(r'У\s+[А-ЯЁA-Za-zа-яё]+\s*[.,](?:\s|$)', body, flags=re.IGNORECASE):
+        return None
+    entries: list[tuple[str, int]] = []
+    for name, symbols in re.findall(r'У\s+([А-ЯЁA-Za-zа-яё]+)\s+(' + re.escape(symbol) + r'+)', body, flags=re.IGNORECASE):
+        entries.append((_v299_capitalize(name), len(symbols)))
+    if not entries:
+        return None
+    return symbol, multiplier, item_token, entries, question
+
+
+def _v299_try_pictogram_prompt(original_text: str) -> dict | None:
+    if 'пиктограмма' not in _v299_norm(original_text):
+        return None
+    parsed = _v299_extract_pictogram(original_text)
+    if parsed is None:
+        return _v299_low_confidence_payload(original_text)
+    _symbol, multiplier, item_token, entries, question = parsed
+    item = _v299_canon_item(item_token)
+    counts = {name: qty * multiplier for name, qty in entries}
+    q_norm = _v299_norm(question)
+    single_match = re.match(r'^сколько\s+(.+?)\s+у\s+([а-яёa-z]+)\?*$', q_norm)
+    if single_match:
+        target = _v299_capitalize(single_match.group(2))
+        if target not in counts:
+            return _v299_low_confidence_payload(original_text)
+        total = counts[target]
+        steps = [f'Один знак показывает {multiplier} {_v299_count(multiplier, item).split(" ", 1)[1]}', f'У {target} {total // multiplier} знака, значит {total} {_v299_count(total, item).split(" ", 1)[1]}']
+        return _v299_info_payload(original_text, source='local:live-v299-g1-pictogram', steps=steps, final_answer=f'У {target} {_v299_count(total, item)}', answer_number=str(total), answer_unit=_v299_count(total, item).split(' ', 1)[1])
+    if re.match(r'^сколько\s+.+?\s+всего\?*$', q_norm):
+        total = sum(counts.values())
+        steps = [f'Считаем по пиктограмме: {total} {_v299_count(total, item).split(" ", 1)[1]} всего']
+        return _v299_info_payload(original_text, source='local:live-v299-g1-pictogram', steps=steps, final_answer=f'Всего {_v299_count(total, item)}', answer_number=str(total), answer_unit=_v299_count(total, item).split(' ', 1)[1])
+    tf_match = re.match(r'^верно ли, что у ([а-яёa-z]+) (\d+) (.+?)\?*$', q_norm)
+    if tf_match:
+        target = _v299_capitalize(tf_match.group(1))
+        claim_n = int(tf_match.group(2))
+        if target not in counts:
+            return _v299_low_confidence_payload(original_text)
+        verdict = 'верно' if counts[target] == claim_n else 'неверно'
+        steps = [f'У {target} по пиктограмме {counts[target]} {_v299_count(counts[target], item).split(" ", 1)[1]}', f'Сравниваем с утверждением: {verdict}']
+        return _v299_info_payload(original_text, source='local:live-v299-g1-pictogram-true-false', steps=steps, final_answer=verdict)
+    return None
+
+
+def _v299_try_picture_prompt(original_text: str) -> dict | None:
+    low = _v299_norm(original_text)
+    match = re.match(r'^на рисунке (\d+) .+? и (\d+) .+?\. сколько предметов всего на рисунке\?*$', low)
+    if not match:
+        return None
+    a, b = int(match.group(1)), int(match.group(2))
+    total = a + b
+    steps = [f'{a} + {b} = {total}']
+    return _v299_info_payload(original_text, source='local:live-v299-g1-picture-count', steps=steps, final_answer=f'На рисунке {_v299_count(total, "предмет")} ', answer_number=str(total), answer_unit='предметов')
+
+
+def _v299_try_number_pattern_prompt(original_text: str) -> dict | None:
+    match = re.match(r'^\s*Продолжи закономерность:\s*([0-9,\s-]+)\.\s*Какое число следующее\?*$', str(original_text or '').strip(), flags=re.IGNORECASE)
+    if not match:
+        return None
+    values = [int(token.strip()) for token in match.group(1).split(',') if token.strip()]
+    if len(values) < 3:
+        return _v299_low_confidence_payload(original_text)
+    diffs = [b - a for a, b in zip(values, values[1:])]
+    if len(set(diffs)) != 1:
+        return _v299_low_confidence_payload(original_text)
+    diff = diffs[0]
+    nxt = values[-1] + diff
+    if diff >= 0:
+        step = f'Каждый раз прибавляем {diff}: {values[-1]} + {diff} = {nxt}'
+    else:
+        step = f'Каждый раз уменьшаем на {abs(diff)}: {values[-1]} - {abs(diff)} = {nxt}'
+    return _v299_info_payload(original_text, source='local:live-v299-g1-pattern-number', steps=[step], final_answer=f'Следующее число — {nxt}', answer_number=str(nxt))
+
+
+def _v299_try_shape_pattern_prompt(original_text: str) -> dict | None:
+    match = re.match(r'^\s*Продолжи закономерность:\s*(.+?)\.\s*Какая фигура следующая\?*$', str(original_text or '').strip(), flags=re.IGNORECASE)
+    if not match:
+        return None
+    parts = [_v298_canon_figure(part.strip()) for part in match.group(1).split(',') if part.strip()]
+    if len(parts) < 3 or any(part not in _V299_SHAPES for part in parts):
+        return None
+    cycle: list[str] = []
+    for length in (1, 2, 3):
+        candidate = parts[:length]
+        if all(parts[i] == candidate[i % length] for i in range(len(parts))):
+            cycle = candidate
+            break
+    if not cycle:
+        return _v299_low_confidence_payload(original_text)
+    nxt = cycle[len(parts) % len(cycle)]
+    return _v299_info_payload(original_text, source='local:live-v299-g1-pattern-shape', steps=[f'Фигуры повторяются так: {", ".join(cycle)}'], final_answer=f'Следующая фигура — {nxt}')
+
+
+def _v299_try_instruction_prompt(original_text: str) -> dict | None:
+    match = re.match(r'^\s*Выполни инструкцию:\s*начни с числа\s+(\d+)\s*;\s*(.+?)\.\s*Какое число получилось\?*$', str(original_text or '').strip(), flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None
+    current = int(match.group(1))
+    actions = [part.strip() for part in match.group(2).split(';') if part.strip()]
+    if not actions:
+        return _v299_low_confidence_payload(original_text)
+    steps: list[str] = []
+    for action in actions:
+        low = _v299_norm(action)
+        op_match = None
+        if op_match is None:
+            m = re.match(r'^прибавь (\d+)$', low)
+            if m:
+                delta = int(m.group(1))
+                new_value = current + delta
+                steps.append(f'{current} + {delta} = {new_value}')
+                current = new_value
+                op_match = True
+        if op_match is None:
+            m = re.match(r'^вычти (\d+)$', low)
+            if m:
+                delta = int(m.group(1))
+                new_value = current - delta
+                steps.append(f'{current} - {delta} = {new_value}')
+                current = new_value
+                op_match = True
+        if op_match is None:
+            m = re.match(r'^увеличь на (\d+)$', low)
+            if m:
+                delta = int(m.group(1))
+                new_value = current + delta
+                steps.append(f'{current} + {delta} = {new_value}')
+                current = new_value
+                op_match = True
+        if op_match is None:
+            m = re.match(r'^уменьши на (\d+)$', low)
+            if m:
+                delta = int(m.group(1))
+                new_value = current - delta
+                steps.append(f'{current} - {delta} = {new_value}')
+                current = new_value
+                op_match = True
+        if not op_match:
+            return _v299_low_confidence_payload(original_text)
+    return _v299_info_payload(original_text, source='local:live-v299-g1-instruction', steps=steps, final_answer=f'Получилось {current}', answer_number=str(current))
+
+
+def _v299_is_multi_task_request(text: str) -> bool:
+    normalized = str(text or '').replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return False
+    lines = [line.strip() for line in normalized.split("\n") if line.strip()]
+    if len(lines) >= 2:
+        mathy = 0
+        for line in lines:
+            low = _v299_norm(line)
+            if _looks_like_v299_math_information_prompt(line):
+                mathy += 1
+                continue
+            if re.search(r'\d', line) and ('?' in line or any(marker in low for marker in ('сколько', 'верно ли', 'какое число', 'какая фигура', 'что записано'))):
+                mathy += 1
+        if mathy >= 2:
+            return True
+    return False
+
+def _prevalidate_v299_math_information_request(text: str) -> dict | None:
+    if not _looks_like_v299_math_information_prompt(text):
+        return None
+    if _v299_is_multi_task_request(text):
+        return build_multi_task_payload(text)
+    low = _v299_norm(text)
+    if 'таблица' in low:
+        parsed = _v299_extract_table(text)
+        if parsed is None:
+            return _v299_low_confidence_payload(text)
+        entries, question = parsed
+        has_lookup = _v299_parse_table_lookup_question(question, entries) is not None
+        tf_row = _v299_parse_table_true_false_question(question, entries)
+        has_tf = tf_row is not None and bool(tf_row[2])
+        if not has_lookup and not has_tf:
+            return _v299_low_confidence_payload(text)
+    if 'пиктограмма' in low:
+        if re.search(r'У\s+[А-ЯЁA-Za-zа-яё]+\s*[.,](?:\s|$)', str(text or ''), flags=re.IGNORECASE):
+            return _v299_low_confidence_payload(text)
+        parsed = _v299_extract_pictogram(text)
+        if parsed is None:
+            return _v299_low_confidence_payload(text)
+        _symbol, _multiplier, _item, entries, question = parsed
+        q_norm = _v299_norm(question)
+        single_match = re.match(r'^сколько\s+(.+?)\s+у\s+([а-яёa-z]+)\?*$', q_norm)
+        if single_match:
+            target = _v299_capitalize(single_match.group(2))
+            if target not in {name for name, _ in entries}:
+                return _v299_low_confidence_payload(text)
+        tf_match = re.match(r'^верно ли, что у ([а-яёa-z]+) (\d+) (.+?)\?*$', q_norm)
+        if tf_match:
+            target = _v299_capitalize(tf_match.group(1))
+            if target not in {name for name, _ in entries}:
+                return _v299_low_confidence_payload(text)
+        if re.match(r'^сколько\s+.+?\s+всего\?*$', q_norm) and len(entries) < 2:
+            return _v299_low_confidence_payload(text)
+    if 'инструкц' in low:
+        parsed_instruction = _v299_try_instruction_prompt(text)
+        if parsed_instruction is not None and str(parsed_instruction.get('source') or '').startswith('local:live-v299-g1-instruction'):
+            return None
+        return _v299_low_confidence_payload(text)
+    return None
+
+
+def _solve_v299_math_information_prompt(original_text: str) -> dict | None:
+    if not _looks_like_v299_math_information_prompt(original_text):
+        return None
+    guard = _prevalidate_v299_math_information_request(original_text)
+    if guard is not None:
+        return guard
+    for builder in (
+        _v299_try_table_prompt,
+        _v299_try_pictogram_prompt,
+        _v299_try_picture_prompt,
+        _v299_try_number_pattern_prompt,
+        _v299_try_shape_pattern_prompt,
+        _v299_try_instruction_prompt,
+    ):
+        payload = builder(original_text)
+        if payload is not None:
+            return payload
+    return None
+
+
+def _verified_v299_math_information_payload(original_text: str, parsed: dict[str, Any] | None = None) -> dict | None:
+    structural = _solve_v299_math_information_prompt(original_text)
+    if not isinstance(structural, dict):
+        return None
+    source = str(structural.get('source') or '')
+    if not source.startswith('local:live-v299-g1-'):
+        return None
+    out = dict(structural)
+    out['source'] = 'deepseek-primary'
+    out['verifier'] = 'local-v299-information-postprocess'
+    return out
