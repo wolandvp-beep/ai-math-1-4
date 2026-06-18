@@ -29,8 +29,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 DEFAULT_BACKEND_BASE_URL = 'https://wolandvp-beep-ai-math-1-4-8e2f.twc1.net'
-DEFAULT_RELEASE = 'v505_automation_pipeline'
-DEFAULT_AUDIT_KEY = 'v505-live-audit'
+DEFAULT_RELEASE = 'v505_01_automation_pipeline'
+DEFAULT_AUDIT_KEY = 'v505-01-live-audit'
 DEFAULT_SECTION = 'excel_numeric_regression'
 DEFAULT_OFFSET = 200
 DEFAULT_LIMIT = 100

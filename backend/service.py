@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v505_automation_pipeline'
-SOLVER_VERSION = 'v505-automation-pipeline'
+APP_RELEASE = 'v505_01_automation_pipeline'
+SOLVER_VERSION = 'v505-01-automation-pipeline'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -10905,6 +10905,31 @@ def _v50401_general_visible_answer_and_step_fix(out: dict[str, Any] | None, orig
         paren_unit = 'чел.'
         final = f'в секции заболело {n} {_v4011_plural(n, "человек") or "человек"}'
 
+    # V505.01: class absence rows.  This is a reusable visible-answer
+    # formatter for tasks of the form «в классе было N учеников, пришло M,
+    # сколько детей заболели».  It preserves answer_number and only expands the
+    # visible answer/step explanation so the UI answer is not a short Excel-like
+    # phrase.
+    elif re.search(r'сколько\s+дет(?:ей|и)\s+заболел', qlow) and re.search(r'\bкласс[е]?\b', low):
+        expl = 'заболевших детей'
+        paren_unit = 'чел.'
+        final = f'в классе заболели {n} {_v4011_plural(n, "ребёнок") or "детей"}'
+
+    # V505.01: gift/purchase-to-child rows.  Avoid mechanically generated
+    # possessive forms like «Паши мама купила 2 роботов».
+    elif re.search(r'сколько\s+[а-яёa-z-]+\s+купила\s+мама', qlow) and re.search(r'\bу\s+([А-ЯЁA-Z][а-яёa-z-]+)\b', original_text, flags=re.IGNORECASE):
+        m_owner = re.search(r'\bу\s+([А-ЯЁA-Z][а-яёa-z-]+)\b', original_text, flags=re.IGNORECASE)
+        owner = m_owner.group(1) if m_owner else ''
+        dat = {'Паша': 'Паше', 'Паши': 'Паше', 'Саша': 'Саше', 'Саши': 'Саше', 'Маша': 'Маше', 'Маши': 'Маше', 'Даша': 'Даше', 'Даши': 'Даше', 'Ваня': 'Ване', 'Вани': 'Ване', 'Петя': 'Пете', 'Пети': 'Пете', 'Коля': 'Коле', 'Коли': 'Коле', 'Оля': 'Оле', 'Оли': 'Оле', 'Юля': 'Юле', 'Юли': 'Юле', 'Вика': 'Вике', 'Вики': 'Вике'}.get(owner, owner)
+        # Prefer the answer unit from the model, but keep a common plural form
+        # for robot tasks so the answer remains grammatical.
+        unit_word = str(answer_unit if 'answer_unit' in locals() else '') or str(structured.get('answer_unit') or '')
+        if 'робот' in low or 'робот' in unit_word.lower():
+            obj = ('робот' if n == 1 else ('робота' if n % 10 in {2, 3, 4} and n % 100 not in {12, 13, 14} else 'роботов'))
+            expl = 'роботов купила мама'
+            paren_unit = 'шт.'
+            final = f'мама купила {dat} {n} {obj}'.strip()
+
     if not final:
         return out
 
@@ -11508,7 +11533,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v505-automation-pipeline'
+    marker = 'v505-01-automation-pipeline'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
