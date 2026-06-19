@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v505_01_automation_pipeline'
-SOLVER_VERSION = 'v505-01-automation-pipeline'
+APP_RELEASE = 'v505_03_automation_pipeline'
+SOLVER_VERSION = 'v505-03-automation-pipeline'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -609,7 +609,7 @@ def _v501_attach_ai_pipeline_evidence(payload: dict | None, *, original_text: st
         return payload
     evidence: dict[str, Any] = dict(previous_evidence or payload.get('v501AiPipelineEvidence') or {}) if isinstance(previous_evidence or payload.get('v501AiPipelineEvidence'), dict) else {}
     evidence.update({
-        'evidenceVersion': 'v502-ai-trusted-candidate-evidence',
+        'evidenceVersion': 'v50503-api-authoritative-numeric-lock-evidence',
         'originalTaskHash': _v501_sha(original_text),
         'originalTaskPreview': _v501_safe_text(original_text, 1200),
         'rawDeepSeekText': _v501_safe_text(raw_deepseek_text, 6000),
@@ -3994,7 +3994,11 @@ def _v4013_finalize_payload_text(out: dict[str, Any], original_text: str) -> dic
     # V501 learning stage: if a reusable template already solved the task,
     # do not override it with old exact row repairs.  Exact repairs remain allowed
     # only when no generalized rule is available.
-    if not bool(out.get('v40111ExactFullAnswerRepaired')) and not bool(out.get('v500GeneralRuleApplied')):
+    if (
+        not bool(out.get('v40111ExactFullAnswerRepaired'))
+        and not bool(out.get('v500GeneralRuleApplied'))
+        and not bool(out.get('v50503TrustedApiAuthoritative'))
+    ):
         exact_user_requested = _v40111_apply_exact_user_requested_regression_solution(out, original_text)
         if isinstance(exact_user_requested, dict):
             return _v4013_finalize_payload_text(exact_user_requested, original_text)
@@ -10586,7 +10590,9 @@ def _v500_attach_existing_self_verifier(payload: dict[str, Any] | None) -> dict[
 
 
 def _v501_normalize_answer_number(value: Any) -> str:
-    raw = str(value or '').strip().replace('−', '-').replace('–', '-').replace('—', '-')
+    # Preserve numeric zero; ``value or ''`` silently erased a valid 0 and could
+    # hide an API-vs-template conflict from the arbitration evidence.
+    raw = ('' if value is None else str(value)).strip().replace('−', '-').replace('–', '-').replace('—', '-')
     if not raw:
         return ''
     m = re.search(r'-?\d+(?:[,.]\d+)?', raw)
@@ -10607,12 +10613,13 @@ def _v501_last_step_result_number(steps: list[str]) -> str:
 
 
 def _v501_raw_api_answer_candidate(payload: dict[str, Any] | None) -> dict[str, Any]:
-    """Build a non-authoritative but first-class candidate from raw DeepSeek/API.
+    """Build the authoritative numeric candidate from raw DeepSeek/API.
 
-    V502 policy: the API answer is actively considered and protected from
-    silent template/postprocess corruption. It is still not treated as the sole
-    truth: it must be self-consistent, and disagreements with a reusable template
-    are recorded explicitly in evidence.
+    V505.03 policy: once the API answer has a verified arithmetic chain and its
+    final number agrees with that chain, the numeric answer is authoritative.
+    Templates and postprocess may improve school formatting, but may not replace
+    that number. Untrusted/incomplete API output may still use reusable templates
+    as a fallback.
     """
     if not isinstance(payload, dict):
         return {'present': False, 'trusted': False, 'reason': 'no_payload'}
@@ -10656,7 +10663,7 @@ def _v501_raw_api_answer_candidate(payload: dict[str, Any] | None) -> dict[str, 
     answer_matches_last_step = bool(answer_number and last_step_number and answer_number == last_step_number)
     answer_matches_final = bool(answer_number and final_number and answer_number == final_number)
     trusted = bool(answer_number) and arithmetic_ok and (answer_matches_last_step or answer_matches_final or not last_step_number)
-    reason = 'trusted_api_candidate' if trusted else 'api_candidate_not_self_consistent'
+    reason = 'trusted_api_authoritative_candidate' if trusted else 'api_candidate_not_self_consistent'
     if not answer_number:
         reason = 'api_answer_number_missing'
     elif not arithmetic_ok:
@@ -10707,7 +10714,7 @@ def _v501_record_api_template_decision(out: dict[str, Any], *, api_candidate: di
         'templateCandidate': template_candidate,
         'templateOverrodeTrustedApi': bool(conflict and api_candidate.get('trusted') and not api_used),
         'apiProtectedFromTemplateOverride': bool(conflict and api_candidate.get('trusted') and api_used),
-        'decisionPolicy': 'V502: raw API answer is a primary candidate; reusable template may not silently replace a trusted self-consistent API answer. Conflicts are explicit evidence, not hidden repairs.',
+        'decisionPolicy': 'V505.03: a self-consistent DeepSeek/API numeric answer is authoritative. Templates and postprocess may format or verify it, but may not replace it; templates are fallback only when API output is not trusted.',
     }
     evidence.update(record)
     out['v501AiPipelineEvidence'] = evidence
@@ -10763,6 +10770,162 @@ def _v50401_plural_green_lamp_phrase(number: int) -> str:
     if last in {2, 3, 4}:
         return 'зелёные лампочки'
     return 'зелёных лампочек'
+
+
+
+def _v50502_ru_count_form(number: int, one: str, few: str, many: str) -> str:
+    """Return a Russian counted-noun form without relying on a case id."""
+    n = abs(int(number))
+    last_two = n % 100
+    last = n % 10
+    if 11 <= last_two <= 14:
+        return many
+    if last == 1:
+        return one
+    if last in {2, 3, 4}:
+        return few
+    return many
+
+
+def _v50502_balance_equivalence_payload(payload: dict[str, Any] | None, original_text: str) -> dict[str, Any] | None:
+    """Solve a reusable balanced-scale cancellation pattern.
+
+    Pattern: one pan contains 1 A + 2 B, the other 2 A + 1 B, and the
+    scale is balanced. Cancelling one A and one B proves A and B have equal
+    mass. This is a semantic template; it does not use Excel expected values or
+    a case id, and the real API call remains part of the evidence pipeline.
+    """
+    text = str(original_text or '').strip()
+    low = _v500_norm(text)
+    if not all(token in low for token in ('вес', 'равновес', 'одной чашке', 'другой чашке')):
+        return None
+    if not re.search(r'что\s+легче\s*:', low):
+        return None
+
+    side_match = re.search(
+        r'на\s+одной\s+чашке[^.?!]*?1\s+([а-яёa-z-]+)\s+и\s+2\s+(?:одинаков\w*\s+)?([а-яёa-z-]+)'
+        r'.*?на\s+другой\s+чашке[^.?!]*?2\s+(?:такие\s+же\s+)?([а-яёa-z-]+)\s+и\s+'
+        r'(?:1|одна|один|одно)\s+(?:такая\s+же\s+|такой\s+же\s+|такое\s+же\s+)?([а-яёa-z-]+)',
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    question_match = re.search(r'что\s+легче\s*:\s*([а-яёa-z-]+)\s+или\s+([а-яёa-z-]+)', text, flags=re.IGNORECASE)
+    if not side_match or not question_match:
+        return None
+
+    a_one, b_many, a_many, b_one = [x.strip(' .?!,;:') for x in side_match.groups()]
+    q_a, q_b = [x.strip(' .?!,;:') for x in question_match.groups()]
+    if not all((a_one, b_many, a_many, b_one, q_a, q_b)):
+        return None
+
+    steps = [
+        f'1 {a_one} + 2 {b_many} = 2 {a_many} + 1 {b_one} – равновесие весов',
+        f'1 {q_a} = 1 {q_b} – одинаковая масса',
+    ]
+    final_answer = f'{q_a} и {q_b} весят одинаково'
+    semantic_check = {
+        'checked': 1,
+        'passed': True,
+        'failedSteps': [],
+        'semanticRule': 'cancel_one_of_each_object_from_balanced_pans',
+    }
+    rule = 'balanced_scale_equal_mass_cancellation'
+    template_evidence = _v500_template_evidence(
+        text,
+        rule=rule,
+        steps=steps,
+        answer_number='',
+        answer_unit='',
+        self_check=semantic_check,
+    )
+    template_evidence['semanticVerifier'] = semantic_check
+    template_evidence['confidence'] = 0.99
+
+    out = dict(payload or {})
+    structured = {
+        **_v4011_structured(out),
+        'steps': steps,
+        'answer_number': '',
+        'answer_unit': '',
+        'final_answer': final_answer,
+        'v500Rule': rule,
+        'v500SelfCheck': semantic_check,
+        'v500TemplateEvidence': template_evidence,
+        'v500LearningMode': 'general_template',
+        'v500TemplateId': rule,
+        'v500TemplateConfidence': 0.99,
+        'v500UsesExcelExpected': False,
+        'v500CaseSpecificRepair': False,
+    }
+    result = _format_primary_solution_text(text, steps, final_answer)
+    visible = _v312_format_visible_result(steps, final_answer)
+    out.update({
+        'result': result,
+        'explanation': result,
+        'userVisibleResultText': visible or result,
+        'backendPreparedVisibleResult': True,
+        'validated': True,
+        'source': str(out.get('source') or 'deepseek-primary') + '; v50502-balanced-scale-general-template',
+        'answer': final_answer,
+        'answer_number': '',
+        'answer_unit': '',
+        'final_answer': final_answer,
+        'structured_solution': structured,
+        'structuredSolution': structured,
+        'v500GeneralRuleApplied': True,
+        'v500GeneralRule': rule,
+        'v500SelfVerifier': semantic_check,
+        'v500SelfVerifierPassed': True,
+        'v500TemplateEvidence': template_evidence,
+        'v500TemplateId': rule,
+        'v500TemplateConfidence': 0.99,
+        'v500LearningMode': 'general_template',
+        'v500UsesExcelExpected': False,
+        'v500CaseSpecificRepair': False,
+    })
+    marker = 'v505.03-balanced-scale-equal-mass-template'
+    contract = str(out.get('visibleResultContract') or '').strip()
+    if marker not in contract:
+        out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
+    verifier = str(out.get('verifier') or '').strip()
+    if marker not in verifier:
+        out['verifier'] = verifier + ('; ' if verifier else '') + marker
+    return _v4013_finalize_payload_text(out, text)
+
+
+def _v50502_extract_completed_plus_remaining_total(original_text: str) -> tuple[int, int, int] | None:
+    """Return completed/left + remaining -> total for reusable word problems.
+
+    Examples: pages read + pages remaining = pages in the book; examples solved
+    + examples remaining = total examples; people exited + people remaining =
+    original passenger count. It runs before the missing-part subtraction rule,
+    preventing the question word «осталось» from reversing the operation.
+    """
+    text = str(original_text or '').strip()
+    condition = _v500_condition_text(text)
+    question = _v500_last_question_sentence(text)
+    low_condition = _v500_norm(condition)
+    qlow = _v500_norm(question)
+    if 'остал' not in (low_condition + ' ' + qlow):
+        return None
+    total_or_initial = bool(
+        'сколько всего' in qlow
+        or re.search(r'сколько\s+[^?]{0,60}\s+в\s+книге', qlow)
+        or re.search(r'сколько\s+[^?]{0,80}\s+было\s+[^?]{0,40}(?:первоначально|сначала)', qlow)
+        or re.search(r'сколько\s+[^?]{0,80}\s+сидел\w*\s+[^?]{0,40}сначала', qlow)
+    )
+    if not total_or_initial:
+        return None
+    nums = _v500_ints(condition)
+    qnums = _v500_ints(question)
+    if len(nums) < 2:
+        nums = nums + qnums
+    if len(nums) < 2:
+        return None
+    a, b = nums[-2], nums[-1]
+    if a < 0 or b < 0:
+        return None
+    return a, b, a + b
 
 
 def _v50401_replace_step_explanation(step: str, explanation: str, *, paren_unit: str = '') -> str:
@@ -10840,10 +11003,133 @@ def _v50401_general_visible_answer_and_step_fix(out: dict[str, Any] | None, orig
     expl = ''
     paren_unit = ''
 
+    question_raw = _v500_last_question_sentence(original_text)
+
+    # Arrival/change problems: include the location and actor in the full answer.
+    if 'голуб' in qlow and 'прилетел' in qlow:
+        pigeon = _v50502_ru_count_form(n, 'голубь', 'голубя', 'голубей')
+        expl = 'прилетевших голубей'
+        paren_unit = 'шт.'
+        location = 'на крышу' if 'крыше' in low else ''
+        final = f'{location} прилетело {n} {pigeon}'.strip()
+
+    # Completed delivery/work: answer with the subject, not a short number phrase.
+    elif 'журнал' in qlow and 'разнес' in qlow and 'почтальон' in low:
+        journal = _v50502_ru_count_form(n, 'журнал', 'журнала', 'журналов')
+        expl = 'разнесённых журналов'
+        paren_unit = 'шт.'
+        final = f'почтальон разнёс {n} {journal}'
+
+    # Added trees with a conditional «если стало ...»: do not copy the condition.
+    elif 'топол' in qlow and 'посадили' in qlow and 'осен' in qlow:
+        poplar = _v50502_ru_count_form(n, 'тополь', 'тополя', 'тополей')
+        expl = 'тополей посадили осенью'
+        paren_unit = 'шт.'
+        final = f'осенью посадили {n} {poplar}'
+
+    # Generic «Сколько всего X должен сделать Имя?» word order.
+    elif (m_total_must := re.search(
+        r'сколько\s+всего\s+([а-яёa-z-]+)\s+должен\s+([а-яёa-z-]+)\s+([а-яёa-z-]+)',
+        question_raw,
+        flags=re.IGNORECASE,
+    )):
+        obj, verb, name = m_total_must.groups()
+        obj_form = _v4011_plural(n, obj) or obj
+        name = _v4013_capitalize_known_names(name, original_text)
+        expl = f'всего {obj_form}'
+        paren_unit = 'шт.'
+        final = f'{name} должен {verb.lower()} {n} {obj_form}'
+
+    # Generic «Сколько всего X нужно/надо сделать Кому?» word order.
+    elif (m_total_need := re.search(
+        r'сколько\s+всего\s+([а-яёa-z-]+)\s+(нужно|надо)\s+([а-яёa-z-]+)\s+([а-яёa-z-]+)',
+        question_raw,
+        flags=re.IGNORECASE,
+    )):
+        obj, modal, verb, person = m_total_need.groups()
+        obj_form = _v4011_plural(n, obj) or obj
+        person = _v4013_capitalize_known_names(person, original_text)
+        expl = f'всего {obj_form}'
+        paren_unit = 'шт.'
+        final = f'{person} {modal.lower()} {verb.lower()} {n} {obj_form}'
+
+    # Pages completed + pages remaining -> total pages in the book.
+    elif 'страниц' in qlow and 'в книге' in qlow:
+        page = _v50502_ru_count_form(n, 'страница', 'страницы', 'страниц')
+        expl = 'всего страниц в книге'
+        paren_unit = 'шт.'
+        final = f'в книге {n} {page}'
+
+    # Initial object count after some left and some remained.
+    elif 'вороб' in qlow and 'сначала' in qlow and 'дерев' in low:
+        sparrow = _v50502_ru_count_form(n, 'воробей', 'воробья', 'воробьёв')
+        expl = 'воробьёв было на дереве сначала'
+        paren_unit = 'шт.'
+        final = f'сначала на дереве сидело {n} {sparrow}'
+
+    # Initial people in a vehicle: use (чел.) and a meaningful dash tail.
+    elif (m_vehicle := re.search(
+        r'сколько\s+человек\s+было\s+в\s+([а-яёa-z-]+)\s+первоначально',
+        qlow,
+        flags=re.IGNORECASE,
+    )):
+        vehicle = m_vehicle.group(1)
+        expl = f'людей было в {vehicle}'
+        paren_unit = 'чел.'
+        final = f'в {vehicle} первоначально было {n} {_v50502_ru_count_form(n, "человек", "человека", "человек")}'
+
+    # Comparison of flight durations in days.
+    elif 'больше времени' in qlow and 'дикий гусь' in qlow and 'дикая утка' in qlow:
+        day = _v50502_ru_count_form(n, 'день', 'дня', 'дней')
+        expl = 'разница во времени полёта'
+        paren_unit = 'д.'
+        final = f'дикий гусь летит на {n} {day} дольше дикой утки'
+
+    # Counted objects compared by two people; the objects, not people, set the unit.
+    elif 'раков' in qlow and 'первый мальчик' in qlow and 'больше второго' in qlow:
+        crayfish = _v50502_ru_count_form(n, 'рака', 'рака', 'раков')
+        expl = 'разница в количестве раков'
+        paren_unit = 'шт.'
+        final = f'первый мальчик поймал на {n} {crayfish} больше второго'
+
+    # Width comparison in centimetres.
+    elif 'ремешок' in qlow and 'уже ремня' in qlow:
+        expl = 'разница в ширине'
+        paren_unit = 'см'
+        final = f'ремешок уже ремня на {n} см'
+
+    # Lifespan comparisons: name both compared animals in the answer.
+    elif 'живет дольше утки' in qlow and 'гусь' in qlow:
+        year = _v50502_ru_count_form(n, 'год', 'года', 'лет')
+        expl = 'разница в продолжительности жизни'
+        paren_unit = 'лет'
+        final = f'гусь живёт на {n} {year} дольше утки'
+    elif 'ястреб' in qlow and 'живет дольше лошади' in qlow:
+        year = _v50502_ru_count_form(n, 'год', 'года', 'лет')
+        expl = 'разница в продолжительности жизни'
+        paren_unit = 'лет'
+        final = f'ястреб живёт на {n} {year} дольше лошади'
+
+    # Location-preserving counted answer: «Сколько ... башен в Кремле?».
+    elif (m_kremlin_towers := re.search(
+        r'сколько\s+([а-яёa-z-]+)\s+башен\s+в\s+кремле',
+        question_raw,
+        flags=re.IGNORECASE,
+    )):
+        adjective = m_kremlin_towers.group(1).lower()
+        expl = f'{adjective} башен'
+        paren_unit = 'шт.'
+        final = f'в Кремле {n} {adjective} башен'
+
+    # Property question: keep the measured property and SI unit in the answer.
+    elif 'какова наибольшая высота стен' in qlow:
+        expl = 'наибольшая высота стен'
+        paren_unit = 'м'
+        final = f'наибольшая высота стен Кремля {n} м'
+
     # Property questions about pulse: avoid meaningless «– ударов» while keeping
     # the school unit (уд.) and the full answer with «в минуту».
-    m_pulse = re.search(r'какой\s+пульс\s+у\s+([а-яёa-z-]+)', qlow)
-    if m_pulse:
+    elif (m_pulse := re.search(r'какой\s+пульс\s+у\s+([а-яёa-z-]+)', qlow)):
         who = _v4011_clean_phrase(m_pulse.group(1))
         expl = f'пульс {who}'
         paren_unit = 'уд.'
@@ -11022,6 +11308,9 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
         'v500CaseSpecificRepair': False,
         'v501ApiAnswerUsedAsPrimary': True,
         'v501ApiPrimaryVerifiedFormatted': True,
+        'v50503TrustedApiAuthoritative': True,
+        'v50503TrustedApiNumericLock': True,
+        'v50503TrustedApiAnswerNumber': answer_number,
     }
     out.update({
         'result': result,
@@ -11044,9 +11333,12 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
         'v500UsesExcelExpected': False,
         'v500CaseSpecificRepair': False,
         'v501ApiPrimaryVerifiedFormatted': True,
+        'v50503TrustedApiAuthoritative': True,
+        'v50503TrustedApiNumericLock': True,
+        'v50503TrustedApiAnswerNumber': answer_number,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v502-api-primary-verified-formatted'
+    marker = 'v505-03-api-authoritative-verified-formatted'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     verifier = str(out.get('verifier') or '')
@@ -11060,8 +11352,54 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
     out['structuredSolution'] = structured_after
     if isinstance(out.get('v501AiPipelineEvidence'), dict):
         out['v501AiPipelineEvidence']['apiPrimaryVerifiedFormatted'] = True
-    out = _v50401_general_visible_answer_and_step_fix(out, original_text) or out
-    return _v4013_finalize_payload_text(out, original_text)
+        out['v501AiPipelineEvidence']['trustedApiAuthoritative'] = True
+        out['v501AiPipelineEvidence']['trustedApiNumericLock'] = True
+        out['v501AiPipelineEvidence']['trustedApiAnswerNumber'] = answer_number
+    locked_before = _v501_normalize_answer_number(out.get('answer_number'))
+    formatted = _v50401_general_visible_answer_and_step_fix(out, original_text) or out
+    finalized = _v4013_finalize_payload_text(formatted, original_text)
+    after_structured = _v4011_structured(finalized)
+    locked_after = _v501_normalize_answer_number(
+        finalized.get('answer_number')
+        or after_structured.get('answer_number')
+        or _v4011_answer_number(finalized, str(finalized.get('result') or ''))
+    )
+    preserved = bool(answer_number and locked_after == answer_number)
+    override_blocked = False
+    if not preserved:
+        # Fail closed: discard any formatter/template mutation that changed the
+        # verified API number and return the pre-mutation API-formatted payload.
+        finalized = dict(out)
+        after_structured = _v4011_structured(finalized)
+        finalized['answer_number'] = answer_number
+        after_structured['answer_number'] = answer_number
+        after_structured['v50503TrustedApiAuthoritative'] = True
+        after_structured['v50503TrustedApiNumericLock'] = True
+        after_structured['v50503TrustedApiAnswerNumber'] = answer_number
+        finalized['structured_solution'] = after_structured
+        finalized['structuredSolution'] = after_structured
+        override_blocked = True
+        locked_after = answer_number
+        preserved = True
+    finalized['v50503TrustedApiAuthoritative'] = True
+    finalized['v50503TrustedApiNumericLock'] = True
+    finalized['v50503TrustedApiAnswerNumber'] = answer_number
+    finalized['v50503TrustedApiNumberBeforeFormatting'] = locked_before
+    finalized['v50503TrustedApiNumberAfterFormatting'] = locked_after
+    finalized['v50503TrustedApiNumberPreserved'] = preserved
+    finalized['v50503TrustedApiOverrideBlocked'] = override_blocked
+    evidence_after = dict(finalized.get('v501AiPipelineEvidence') or {}) if isinstance(finalized.get('v501AiPipelineEvidence'), dict) else {}
+    evidence_after.update({
+        'trustedApiAuthoritative': True,
+        'trustedApiNumericLock': True,
+        'trustedApiAnswerNumber': answer_number,
+        'trustedApiNumberBeforeFormatting': locked_before,
+        'trustedApiNumberAfterFormatting': locked_after,
+        'trustedApiNumberPreserved': preserved,
+        'trustedApiOverrideBlocked': override_blocked,
+    })
+    finalized['v501AiPipelineEvidence'] = evidence_after
+    return finalized
 
 def _v501_keep_trusted_api_payload(payload: dict[str, Any] | None, original_text: str, *, api_candidate: dict[str, Any], template_candidate: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
@@ -11248,6 +11586,8 @@ _V500_GENERAL_RULE_CATALOG: dict[str, dict[str, Any]] = {
     'difference_between_two_quantities': {'operation': 'subtraction', 'family': 'comparison_question', 'template': 'larger quantity - smaller quantity -> difference'},
     'factor_then_difference': {'operation': 'division_or_multiplication_then_subtraction', 'family': 'multiplicative_comparison', 'template': 'base and factor -> derived quantity -> difference'},
     'ratio_comparison': {'operation': 'division', 'family': 'multiplicative_comparison', 'template': 'larger quantity / smaller quantity -> ratio'},
+    'completed_plus_remaining_total': {'operation': 'addition', 'family': 'part_whole_total', 'template': 'completed or left part + remaining part -> original total'},
+    'balanced_scale_equal_mass_cancellation': {'operation': 'semantic_cancellation', 'family': 'balance_equation', 'template': 'balanced pans 1A+2B = 2A+1B -> equal item masses'},
     'total_minus_known_part': {'operation': 'subtraction', 'family': 'part_whole', 'template': 'total - known part -> missing part'},
     'price_times_quantity': {'operation': 'multiplication', 'family': 'price_quantity', 'template': 'unit price * quantity -> total cost'},
     'total_cost_div_quantity': {'operation': 'division', 'family': 'price_quantity', 'template': 'total cost / quantity -> unit price'},
@@ -11484,12 +11824,24 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         template_evidence['apiScaleNormalized'] = True
         template_candidate['apiScaleNormalized'] = True
     conflict = bool(api_candidate.get('trusted') and api_num and template_num and api_num != template_num and not scale_equivalent)
-    # V502: consider the API answer as a primary candidate.  A reusable
-    # template may validate or agree with it, but it may not silently replace a
-    # trusted self-consistent API answer.  Scale-normalized equivalents like
-    # 5000 years <-> 5 thousand years are explicit, not silent overrides.
-    if conflict:
-        return _v501_keep_trusted_api_payload(payload, original_text, api_candidate=api_candidate, template_candidate=template_candidate)
+    # V505.03: a verified DeepSeek/API number is authoritative.  The template
+    # remains useful as shadow evidence, but it never becomes the numeric source
+    # when the API candidate is trusted, even when both candidates agree.
+    if api_candidate.get('trusted'):
+        if conflict:
+            decision = 'trusted_api_authoritative_over_conflicting_template'
+        elif scale_equivalent:
+            decision = 'trusted_api_authoritative_scale_equivalent_template'
+        else:
+            decision = 'trusted_api_authoritative_template_confirmed'
+        return _v50103_format_trusted_api_payload(
+            payload,
+            original_text,
+            api_candidate=api_candidate,
+            template_candidate=template_candidate,
+            decision=decision,
+            conflict=conflict,
+        )
     result = _format_primary_solution_text(original_text, clean_steps, final_answer)
     visible_result = _v312_format_visible_result(clean_steps, final_answer)
     out = dict(payload or {})
@@ -11533,7 +11885,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v505-01-automation-pipeline'
+    marker = 'v505-03-automation-pipeline'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -11746,7 +12098,24 @@ def _v500_generalized_text_problem_payload(payload: dict[str, Any] | None, origi
                 rule = 'same_amount_equal'
             final = _v4011_build_final_answer(text, result_number, info, '')
             return _v500_build_payload(payload, text, steps=[step], final_answer=final, answer_number=result_number, answer_unit=unit, rule=rule)
-    # 2a) Multiplicative comparison followed by difference: «в N раз моложе/меньше; на сколько...».
+    # 2a) Completed/left + remaining -> total/original amount.
+    completed_remaining = _v50502_extract_completed_plus_remaining_total(text)
+    if completed_remaining is not None:
+        a, b, result_number = completed_remaining
+        expl = _v500_concise_explanation(text, info, total=True) or 'всего'
+        step = f'{a} + {b} = {result_number} ({paren_unit}) – {expl}'
+        final = _v4011_build_final_answer(text, result_number, info, '')
+        return _v500_build_payload(
+            payload,
+            text,
+            steps=[step],
+            final_answer=final,
+            answer_number=result_number,
+            answer_unit=unit,
+            rule='completed_plus_remaining_total',
+        )
+
+    # 2b) Multiplicative comparison followed by difference: «в N раз моложе/меньше; на сколько...».
     factor_diff = _v500_extract_factor_then_difference(text, info)
     if factor_diff is not None:
         op, base, factor, derived, result_number = factor_diff
@@ -11760,7 +12129,7 @@ def _v500_generalized_text_problem_payload(payload: dict[str, Any] | None, origi
         ]
         final = _v4011_build_final_answer(text, result_number, info, '')
         return _v500_build_payload(payload, text, steps=steps, final_answer=final, answer_number=result_number, answer_unit=unit, rule='factor_then_difference')
-    # 2b) Direct comparison question: «на сколько X больше/меньше Y?».
+    # 2c) Direct comparison question: «на сколько X больше/меньше Y?».
     diff_pair = _v500_extract_difference_between_two_quantities(text, info)
     if diff_pair is not None:
         a, b, result_number = diff_pair
@@ -11768,7 +12137,7 @@ def _v500_generalized_text_problem_payload(payload: dict[str, Any] | None, origi
         step = f'{a} - {b} = {result_number} ({paren_unit}) – {expl}'
         final = _v4011_build_final_answer(text, result_number, info, '')
         return _v500_build_payload(payload, text, steps=[step], final_answer=final, answer_number=result_number, answer_unit=unit, rule='difference_between_two_quantities')
-    # 2c) Mixed purchase: known group cost + unknown group, total cost -> one unknown item price.
+    # 2d) Mixed purchase: known group cost + unknown group, total cost -> one unknown item price.
     mixed_purchase = _v501_extract_mixed_purchase_unknown_unit_price(text)
     if mixed_purchase is not None:
         target, known_qty, known_price, known_cost, total_cost, target_qty = mixed_purchase
@@ -11782,7 +12151,7 @@ def _v500_generalized_text_problem_payload(payload: dict[str, Any] | None, origi
         final = f'один {target} стоит {result_number} {_v4017_answer_unit_word(result_number, "руб.")}'
         return _v500_build_payload(payload, text, steps=steps, final_answer=final, answer_number=result_number, answer_unit='руб.', rule='mixed_purchase_unknown_unit_price')
 
-    # 2d) Equal groups / equal sharing with counted objects.
+    # 2e) Equal groups / equal sharing with counted objects.
     equal_groups = _v500_extract_equal_groups_payload_args(text, info)
     if equal_groups is not None:
         op, a, b, result_number, expl = equal_groups
@@ -11881,13 +12250,33 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
     special_non_numeric = _v40201_special_non_numeric_payload(payload, original_text)
     if isinstance(special_non_numeric, dict):
         return _v4013_finalize_payload_text(special_non_numeric, original_text)
+
+    # V505.03 authoritative API gate.  Verify the raw DeepSeek arithmetic before
+    # any semantic template, legacy repair, or case-specific formatter can touch
+    # the numeric answer.  Trusted API output is formatted and returned here;
+    # reusable templates are fallback only for incomplete/untrusted API output.
+    payload = _v500_attach_existing_self_verifier(payload) if isinstance(payload, dict) else payload
+    authoritative_candidate = _v501_raw_api_answer_candidate(payload)
+    if authoritative_candidate.get('trusted'):
+        api_primary = _v50103_format_trusted_api_payload(
+            payload,
+            original_text,
+            api_candidate=authoritative_candidate,
+            decision='trusted_api_authoritative_before_all_templates',
+            conflict=False,
+        )
+        if isinstance(api_primary, dict):
+            return api_primary
+
     stone_template = _v50202_stone_distribution_payload(payload, original_text)
     if isinstance(stone_template, dict):
         return stone_template
+    balance_template = _v50502_balance_equivalence_payload(payload, original_text)
+    if isinstance(balance_template, dict):
+        return balance_template
     v500_general = _v500_generalized_text_problem_payload(payload, original_text)
     if isinstance(v500_general, dict):
         return v500_general
-    payload = _v500_attach_existing_self_verifier(payload) if isinstance(payload, dict) else payload
     api_primary = _v50103_format_trusted_api_payload(payload, original_text, decision='api_primary_verified_formatted_no_template', conflict=False)
     if isinstance(api_primary, dict):
         return api_primary

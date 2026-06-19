@@ -29,8 +29,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 DEFAULT_BACKEND_BASE_URL = 'https://wolandvp-beep-ai-math-1-4-8e2f.twc1.net'
-DEFAULT_RELEASE = 'v505_01_automation_pipeline'
-DEFAULT_AUDIT_KEY = 'v505-01-live-audit'
+DEFAULT_RELEASE = 'v505_03_automation_pipeline'
+DEFAULT_AUDIT_KEY = 'v505-03-live-audit'
 DEFAULT_SECTION = 'excel_numeric_regression'
 DEFAULT_OFFSET = 200
 DEFAULT_LIMIT = 100
@@ -122,6 +122,7 @@ def audit_url(backend_base_url: str, frontend_url: str, release: str, audit_key:
         'section': section,
         'offset': str(offset),
         'limit': str(limit),
+        'autoStart': '1',
         'cacheBust': cache_bust or release.replace('_', '-'),
     })
     return frontend_url + '?' + query
@@ -164,6 +165,7 @@ def gate_report(report: dict[str, Any], planned: int | None = None) -> tuple[boo
         'generalization': report.get('v500GeneralizationAcceptance') is True,
         'case_specific_zero': int(report.get('v500CaseSpecificRepairCount') or 0) == 0,
         'learning_coverage': float(report.get('v501LearningCoverageRatio') or report.get('v500TemplateCoverageRatio') or 0.0) >= 0.80,
+        'trusted_api_number_violations_zero': int(report.get('v50503TrustedApiNumberViolationCount') or 0) == 0,
     }
     # If this field is present, strict mode requires no unapproved numeric changes.
     changed = int(report.get('v501PostprocessChangedAnswerNumberCount') or 0)
@@ -177,7 +179,7 @@ def gate_report(report: dict[str, Any], planned: int | None = None) -> tuple[boo
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description='Math AI 1-4 V505 release/audit pipeline helper')
+    parser = argparse.ArgumentParser(description='Math AI 1-4 V505.03 release/audit pipeline helper')
     parser.add_argument('--release', default=DEFAULT_RELEASE)
     parser.add_argument('--audit-key', default=DEFAULT_AUDIT_KEY)
     parser.add_argument('--section', default=DEFAULT_SECTION)
@@ -215,6 +217,9 @@ def main(argv: list[str] | None = None) -> int:
             'v500GeneralizationAcceptance': final.get('v500GeneralizationAcceptance'),
             'v500CaseSpecificRepairCount': final.get('v500CaseSpecificRepairCount'),
             'v501LearningCoverageRatio': final.get('v501LearningCoverageRatio'),
+            'v50503TrustedApiAuthoritativeCount': final.get('v50503TrustedApiAuthoritativeCount'),
+            'v50503TrustedApiNumberPreservedCount': final.get('v50503TrustedApiNumberPreservedCount'),
+            'v50503TrustedApiNumberViolationCount': final.get('v50503TrustedApiNumberViolationCount'),
         }
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
