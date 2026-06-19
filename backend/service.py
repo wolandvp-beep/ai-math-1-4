@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v505_04_automation_pipeline'
-SOLVER_VERSION = 'v505-04-automation-pipeline'
+APP_RELEASE = 'v506_automation_pipeline'
+SOLVER_VERSION = 'v506-automation-pipeline'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -10622,7 +10622,7 @@ def _v501_last_step_result_number(steps: list[str]) -> str:
 def _v501_raw_api_answer_candidate(payload: dict[str, Any] | None) -> dict[str, Any]:
     """Build the authoritative numeric candidate from raw DeepSeek/API.
 
-    V505.04 policy: once the API answer has a verified arithmetic chain and its
+    V506 policy: once the API answer has a verified arithmetic chain and its
     final number agrees with that chain, the numeric answer is authoritative.
     Templates and postprocess may improve school formatting, but may not replace
     that number. Untrusted/incomplete API output may still use reusable templates
@@ -10721,7 +10721,7 @@ def _v501_record_api_template_decision(out: dict[str, Any], *, api_candidate: di
         'templateCandidate': template_candidate,
         'templateOverrodeTrustedApi': bool(conflict and api_candidate.get('trusted') and not api_used),
         'apiProtectedFromTemplateOverride': bool(conflict and api_candidate.get('trusted') and api_used),
-        'decisionPolicy': 'V505.04: a self-consistent DeepSeek/API numeric answer is authoritative. Templates and postprocess may format or verify it, but may not replace it; templates are fallback only when API output is not trusted.',
+        'decisionPolicy': 'V506: a self-consistent DeepSeek/API numeric answer is authoritative. Templates and postprocess may format or verify it, but may not replace it; templates are fallback only when API output is not trusted.',
     }
     evidence.update(record)
     out['v501AiPipelineEvidence'] = evidence
@@ -11489,14 +11489,14 @@ def _v50401_general_visible_answer_and_step_fix(out: dict[str, Any] | None, orig
             paren_unit = 'шт.'
             final = f'мама купила {dat} {n} {obj}'.strip()
 
-    # V505.04: fix recurring people-movement UI tails without changing the
+    # V506: fix recurring people-movement UI tails without changing the
     # trusted API number.
     if not final:
         people_visible = _v50504_people_movement_visible_text(original_text, n)
         if people_visible is not None:
             final, expl, paren_unit = people_visible
 
-    # V505.04: expand short comparison answers (``На N ...``) into full school
+    # V506: expand short comparison answers (``На N ...``) into full school
     # phrases.  This uses only the question grammar/context and the already
     # verified API number; Excel expected and case ids are not consulted.
     if not final:
@@ -11637,7 +11637,7 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
         'v50503TrustedApiAnswerNumber': answer_number,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v505-04-api-authoritative-verified-formatted'
+    marker = 'v506-api-authoritative-verified-formatted'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     verifier = str(out.get('verifier') or '')
@@ -12123,7 +12123,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         template_evidence['apiScaleNormalized'] = True
         template_candidate['apiScaleNormalized'] = True
     conflict = bool(api_candidate.get('trusted') and api_num and template_num and api_num != template_num and not scale_equivalent)
-    # V505.04: a verified DeepSeek/API number is authoritative.  The template
+    # V506: a verified DeepSeek/API number is authoritative.  The template
     # remains useful as shadow evidence, but it never becomes the numeric source
     # when the API candidate is trusted, even when both candidates agree.
     if api_candidate.get('trusted'):
@@ -12184,7 +12184,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v505-04-automation-pipeline'
+    marker = 'v506-automation-pipeline'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -12550,7 +12550,7 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
     if isinstance(special_non_numeric, dict):
         return _v4013_finalize_payload_text(special_non_numeric, original_text)
 
-    # V505.04 authoritative API gate.  Verify the raw DeepSeek arithmetic before
+    # V506 authoritative API gate.  Verify the raw DeepSeek arithmetic before
     # any semantic template, legacy repair, or case-specific formatter can touch
     # the numeric answer.  Trusted API output is formatted and returned here;
     # reusable templates are fallback only for incomplete/untrusted API output.

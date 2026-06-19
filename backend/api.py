@@ -40,7 +40,7 @@ app = FastAPI()
 def _mount_self_hosted_frontend() -> None:
     """Serve the bundled frontend from the same backend host at /app/.
 
-    V505 supports two deployment layouts:
+    V506 supports two deployment layouts:
     - repository layout: backend/ and frontend/ are sibling directories;
     - backend-only Timeweb layout: frontend files are packed into backend/frontend_assets.zip.
 
@@ -192,10 +192,10 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('release', APP_RELEASE),
         ('auditKey', audit_key),
         ('section', 'excel_numeric_regression'),
-        ('offset', '200'),
+        ('offset', '300'),
         ('limit', '100'),
         ('autoStart', '1'),
-        ('cacheBust', 'v505-04-automation-pipeline'),
+        ('cacheBust', 'v506-automation-pipeline'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -213,7 +213,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         ('section', 'excel_numeric_regression'),
         ('key', audit_key),
         ('limit', '100'),
-        ('offset', '200'),
+        ('offset', '300'),
         ('allowExternal', '1'),
         ('maxExternalCalls', '150'),
         ('release', APP_RELEASE),
@@ -221,7 +221,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V505.04 — generalization correction / batch 201–300 numeric, UI-quality and anti-memorization repair',
+        'nextAuditPlannedMapStep': 'V506 — automation/generalization audit / batch 301–400 with trusted DeepSeek/API numeric lock',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -256,7 +256,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditQueryOrderSafe': True,
         'nextAuditNoSectionEntityRisk': True,
         'nextAuditNoQueryParamReorderRisk': True,
-        'nextAuditNote': 'V505 запускает batch 201–300 через self-hosted frontend /app или GitHub Pages fallback: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
+        'nextAuditNote': 'V506 запускает batch 301–400 через self-hosted frontend /app или GitHub Pages fallback: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
     }
 
 
@@ -273,7 +273,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v505-04-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v506-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3717,7 +3717,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v505-04-automation-pipeline-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v506-automation-pipeline-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -5676,7 +5676,7 @@ def _live_audit_acceptance_blockers(run: dict[str, Any]) -> list[str]:
                 and not item.get('v50503TrustedApiNumberPreserved')
             ]
             if trusted_api_lock_violations:
-                blockers.append('V505.04 trusted-API numeric-lock blocker: authoritative API number was not preserved for ' + str(len(trusted_api_lock_violations)) + ' cases')
+                blockers.append('V506 trusted-API numeric-lock blocker: authoritative API number was not preserved for ' + str(len(trusted_api_lock_violations)) + ' cases')
     duplicate_issues = _live_audit_duplicate_quality_issues(evidence)
     if duplicate_issues:
         blockers.append('duplicate audit proof/input cases are present: ' + '; '.join(duplicate_issues[:3]))
@@ -6079,7 +6079,7 @@ def _live_audit_public_run_summary(run: dict[str, Any], *, include_failures_prev
             }
             for item in evidence_rows if isinstance(item, dict) and isinstance(item.get('v501AiPipelineEvidence'), dict)
         ][:5],
-        'v501QualityNote': 'V505.04 records raw DeepSeek text and enforces a numeric lock: a self-consistent API answer is authoritative; templates/postprocess may format it but cannot replace it. Excel remains external audit evidence only.',
+        'v501QualityNote': 'V506 records raw DeepSeek text and enforces a numeric lock: a self-consistent API answer is authoritative; templates/postprocess may format it but cannot replace it. Excel remains external audit evidence only.',
         'uiDomProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('frontendDomRenderedOutputChecked')]),
         'uiResultBoxProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('uiResultBoxFound')]),
         'uiSolveButtonClickProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('uiSolveButtonClicked')]),
@@ -7165,9 +7165,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v505-04-automation-pipeline',
+        'visibleResultContract': 'v506-automation-pipeline',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v505-04-automation-pipeline',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v506-automation-pipeline',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -7946,7 +7946,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v505-04-automation-pipeline'),
+        ('cacheBust', 'v506-automation-pipeline'),
     ])
     return {
         **summary,
@@ -8994,7 +8994,7 @@ def _browser_audit_operator_html(request: Request, payload: dict[str, Any], *, k
     technical_json = json.dumps(payload, ensure_ascii=False, indent=2)
     return f'''<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="robots" content="noindex"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V505.04 generalization correction UI-render live-аудит</title>
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V506 automation/generalization UI-render live-аудит</title>
 <style>
 body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;margin:28px auto;padding:0 16px;line-height:1.45;background:#f8fafc;color:#111827}}
 .box{{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:20px;margin:16px 0;box-shadow:0 8px 22px rgba(15,23,42,.05)}}
@@ -9002,10 +9002,10 @@ body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;ma
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px}}.metric{{background:#f3f4f6;border-radius:14px;padding:12px}}.metric b{{display:block;font-size:24px}}
 .bar{{height:18px;background:#e5e7eb;border-radius:999px;overflow:hidden}}.fill{{height:100%;width:{pct}%;background:#111827}}input{{box-sizing:border-box;width:100%;border:1px solid #d1d5db;border-radius:12px;padding:12px;font:15px ui-monospace,Menlo,monospace;background:#fff}}.muted{{color:#6b7280}}pre{{white-space:pre-wrap;background:#111827;color:#f9fafb;padding:14px;border-radius:14px;overflow:auto;max-height:360px}}
 </style></head><body>
-<h1>V505.04 — generalization correction UI-render audit</h1>
+<h1>V506 — automation/generalization UI-render audit</h1>
 <section class="box">
   <h2>1. Открыть реальную frontend-страницу аудита</h2>
-  <p>V505.04 проверяет automation/generalization pipeline на Excel batch 201–300 через реальный production frontend: откроется self-hosted frontend /app, где будет одна кнопка «Запустить / продолжить аудит».</p>
+  <p>V506 проверяет automation/generalization pipeline на Excel batch 301–400 через реальный production frontend: откроется self-hosted frontend /app, где будет одна кнопка «Запустить / продолжить аудит».</p>
   <p><a class="primary" href="{escape(frontend_url, quote=True)}">Открыть аудит на frontend</a></p>
   <p class="muted">На frontend-странице аудит вводит задания в реальное поле <code>#taskInput</code>, нажимает реальную кнопку <code>#solveBtn</code>, ждёт <code>#resultBox</code> и сверяет DOM с API/expected.</p>
   <input readonly value="{escape(frontend_url, quote=True)}" onclick="this.select()">
@@ -9349,7 +9349,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v505-04-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v506-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -9696,7 +9696,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v505-04-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v506-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:
@@ -10020,7 +10020,7 @@ async def live_audit_runner_acceptance(key: str = '', runId: str = '', release: 
         'suspiciousCount': len(suspicious),
         'suspiciousPassedCount': sum(1 for row in suspicious if row.get('ok')),
         'duplicateQualityIssues': duplicate_issues,
-        'acceptanceRequires': ['status == done', 'completed == planned batch size', 'failed == 0', 'cachedResults == 0', 'externalApiCalls >= required non-fallback cases', 'externalApiCompleted >= required non-fallback normal cases', 'deepseekUsageProofs >= required non-fallback normal cases', 'apiTotalTokens > 0', 'every normal case routeAuditMode == browser-client-ui-render-visible-network, browserClientFetch=true, apiRouteNetworkVisibleToBrowser=true', 'frontend DOM proof recorded for every normal case and uiRenderPassed=true', 'real frontend #taskInput was set and #solveBtn was clicked', 'visible #resultBox answer matches API answer', 'numericComparable rows have numericPassed == true', 'V5 learning evidence coverage >= required minimum', 'V5 postprocessChangedAnswerNumber must be 0 or explicitly reviewed', 'V5 templateOverrodeTrustedApi must be 0', 'V505.04 authoritative trusted API number must be preserved', 'caseProofsTotal == planned', 'suspiciousPassedCount == 0'],
+        'acceptanceRequires': ['status == done', 'completed == planned batch size', 'failed == 0', 'cachedResults == 0', 'externalApiCalls >= required non-fallback cases', 'externalApiCompleted >= required non-fallback normal cases', 'deepseekUsageProofs >= required non-fallback normal cases', 'apiTotalTokens > 0', 'every normal case routeAuditMode == browser-client-ui-render-visible-network, browserClientFetch=true, apiRouteNetworkVisibleToBrowser=true', 'frontend DOM proof recorded for every normal case and uiRenderPassed=true', 'real frontend #taskInput was set and #solveBtn was clicked', 'visible #resultBox answer matches API answer', 'numericComparable rows have numericPassed == true', 'V5 learning evidence coverage >= required minimum', 'V5 postprocessChangedAnswerNumber must be 0 or explicitly reviewed', 'V5 templateOverrodeTrustedApi must be 0', 'V506 authoritative trusted API number must be preserved', 'caseProofsTotal == planned', 'suspiciousPassedCount == 0'],
         'proofHashes': [row.get('proofHash') for row in evidence_rows],
         'acceptanceSummary': {
             'release': APP_RELEASE,

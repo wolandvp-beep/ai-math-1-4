@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Math AI 1-4 release/audit automation helper.
 
-V504 goal: remove repetitive manual GitHub Pages deployment while keeping the
+V506 goal: remove repetitive manual GitHub Pages deployment while keeping the
 quality gates strict. The script is intentionally conservative: it can prepare
 and validate a release package, generate the self-hosted audit URL, and check a
 final-report URL. It does not accept a batch unless all proof fields show real
@@ -9,7 +9,7 @@ API/token/DOM work.
 
 Run from the project root that contains `backend/` and `frontend/`:
 
-    python -B backend/release_pipeline.py --offset 200 --limit 100
+    python -B backend/release_pipeline.py --offset 300 --limit 100
 
 To validate a final report:
 
@@ -29,10 +29,10 @@ from typing import Any
 from urllib.parse import urlencode
 
 DEFAULT_BACKEND_BASE_URL = 'https://wolandvp-beep-ai-math-1-4-8e2f.twc1.net'
-DEFAULT_RELEASE = 'v505_04_automation_pipeline'
-DEFAULT_AUDIT_KEY = 'v505-04-live-audit'
+DEFAULT_RELEASE = 'v506_automation_pipeline'
+DEFAULT_AUDIT_KEY = 'v506-live-audit'
 DEFAULT_SECTION = 'excel_numeric_regression'
-DEFAULT_OFFSET = 200
+DEFAULT_OFFSET = 300
 DEFAULT_LIMIT = 100
 MAX_BACKEND_FILES = 100
 MAX_FRONTEND_FILES = 100
@@ -179,7 +179,7 @@ def gate_report(report: dict[str, Any], planned: int | None = None) -> tuple[boo
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description='Math AI 1-4 V505.04 release/audit pipeline helper')
+    parser = argparse.ArgumentParser(description='Math AI 1-4 V506 release/audit pipeline helper')
     parser.add_argument('--release', default=DEFAULT_RELEASE)
     parser.add_argument('--audit-key', default=DEFAULT_AUDIT_KEY)
     parser.add_argument('--section', default=DEFAULT_SECTION)
