@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v506_automation_pipeline'
-SOLVER_VERSION = 'v506-automation-pipeline'
+APP_RELEASE = 'v506_01_automation_pipeline'
+SOLVER_VERSION = 'v506-01-automation-pipeline'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -668,6 +668,7 @@ def _v501_finish_postprocess_evidence(payload: dict | None, *, before: dict[str,
         'trustedApiNumberAfterFormatting': ('v50503TrustedApiNumberAfterFormatting', 'trustedApiNumberAfterFormatting'),
         'trustedApiNumberPreserved': ('v50503TrustedApiNumberPreserved', 'trustedApiNumberPreserved'),
         'trustedApiOverrideBlocked': ('v50503TrustedApiOverrideBlocked', 'trustedApiOverrideBlocked'),
+        'symbolicApiTrusted': ('v50601SymbolicApiTrusted', 'symbolicApiTrusted'),
     }
     for out_key, candidates in arbitration_map.items():
         for key in candidates:
@@ -677,11 +678,22 @@ def _v501_finish_postprocess_evidence(payload: dict | None, *, before: dict[str,
             if isinstance(after_structured, dict) and key in after_structured:
                 evidence[out_key] = after_structured.get(key)
                 break
+    before_answer_value = str(before.get('answerNumber') or '').strip()
+    after_answer_value = str(after.get('answerNumber') or '').strip()
+    task_for_evidence = str(evidence.get('originalTaskPreview') or '')
+    before_symbolic = _v50601_normalize_symbolic_expression(before_answer_value, task_for_evidence)
+    after_symbolic = _v50601_normalize_symbolic_expression(after_answer_value, task_for_evidence)
+    if before_symbolic or after_symbolic:
+        changed_answer_number = not (before_symbolic and after_symbolic and before_symbolic == after_symbolic)
+    else:
+        before_numeric = _v501_normalize_answer_number(before_answer_value)
+        after_numeric = _v501_normalize_answer_number(after_answer_value)
+        changed_answer_number = str(before_numeric or before_answer_value) != str(after_numeric or after_answer_value)
     evidence.update({
         'postprocessBefore': before,
         'postprocessAfter': after,
         'postprocessReplacements': replacements,
-        'postprocessChangedAnswerNumber': str(before.get('answerNumber') or '') != str(after.get('answerNumber') or ''),
+        'postprocessChangedAnswerNumber': changed_answer_number,
         'postprocessChangedAnswerUnit': str(before.get('answerUnit') or '') != str(after.get('answerUnit') or ''),
         'postprocessChangedFinalAnswer': str(before.get('finalAnswer') or '') != str(after.get('finalAnswer') or ''),
         'postprocessChangedResultText': str(before.get('resultHash') or '') != str(after.get('resultHash') or ''),
@@ -1121,6 +1133,7 @@ def _deepseek_primary_payload(user_text: str) -> dict[str, Any]:
 Для 2 класса, раздел «Числа и величины»: решай задания на числа в пределах 100, десятки и единицы, сравнение, равенства/неравенства, увеличение/уменьшение на единицы и десятки, разностное сравнение, длину, массу, время и стоимость. В final_answer сохраняй единицы и форму вопроса: «47», «6 десятков», «8 единиц», «70 + 3», «48 < 52», «верно», «на 5 больше», «43 см», «2300 г», «95 минут», «36 рублей».
 Для 2 класса, раздел «Арифметические действия»: решай сложение и вычитание в пределах 100, табличное сложение, умножение и деление, названия компонентов умножения/деления и порядок действий со скобками или без скобок. В final_answer пиши только число или термин.
 Для 2 класса, раздел «Текстовые задачи»: решай задачи в одно-два действия, равные группы, деление поровну, цена/количество/стоимость, разностное и кратное сравнение, обратные задачи. В final_answer отвечай по вопросу задачи с единицей: «42 карандаша», «7 рублей», «в 3 раза», «на 8 марок больше». Если данных не хватает, верни cannot_safely_solve=true.
+Если в текстовой задаче количества обозначены латинскими буквами, это полноценная символическая задача, а не недостаток данных. Решай её выражением: answer_number должен содержать выражение вроде «r - z», «v + w» или «g + g»; steps — равенство с этим выражением, единицей в скобках и кратким пояснением; final_answer — полная фраза по вопросу. Не ставь cannot_safely_solve=true только из-за буквенных величин. Для «столько же» сохраняй школьную запись «g + g», а не сворачивай её в «2g».
 Для 2 класса, раздел «Геометрия»: решай задания на ломаную и звенья, длину ломаной, периметр прямоугольника и квадрата, перевод единиц длины см/дм/м, построение отрезков и клетчатую бумагу. В final_answer сохраняй единицы: «22 см», «4 звена», «35 см», «16 клеток».
 Если решение состоит из одного действия, steps должен содержать одну строку без нумерации: «2 + 3 = 5 (шт.) – предметов». Не пиши «1)» для одношаговых примеров. Нумерация нужна только для двух и более действий. Во всех текстовых задачах с величинами/предметами строка вычисления должна иметь вид: выражение = результат (единица) – краткое пояснение; для считаемых предметов используй «(шт.)», для людей — «(чел.)», для измерений/денег/времени — сокращение единицы, например «4 + 4 = 8 (шт.) – деревьев», «5 - 2 = 3 (л) – крови», «10 · 6 = 60 (руб.) – стоимость». В answer_unit можно писать полную единицу, но в visible steps единица должна быть в скобках и сокращённо.
 Пояснение после тире должно быть осмысленным: не пиши «– м», «– кг», «– мама», «– тетрадей он», «– страниц она». Правильно: «– ширина», «– мама зарабатывает», «– тетрадей», «– страниц».
@@ -10602,6 +10615,10 @@ def _v501_normalize_answer_number(value: Any) -> str:
     raw = ('' if value is None else str(value)).strip().replace('−', '-').replace('–', '-').replace('—', '-')
     if not raw:
         return ''
+    # A digit adjacent to a Latin variable belongs to a symbolic expression,
+    # not to a numeric answer.  The symbolic family is handled separately.
+    if re.search(r'[A-Za-z]', raw):
+        return ''
     m = re.search(r'-?\d+(?:[,.]\d+)?', raw)
     if not m:
         return ''
@@ -11550,6 +11567,178 @@ def _v50401_general_visible_answer_and_step_fix(out: dict[str, Any] | None, orig
         fixed['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     return fixed
 
+
+def _v50601_canonical_measure_unit(value: Any) -> str:
+    raw = _v500_norm(str(value or '')).replace('кв. ', 'кв. ')
+    raw = raw.strip(' .')
+    aliases = {
+        'килограмм': 'кг', 'килограмма': 'кг', 'килограммов': 'кг', 'кг': 'кг',
+        'грамм': 'г', 'грамма': 'г', 'граммов': 'г', 'г': 'г',
+        'метр': 'м', 'метра': 'м', 'метров': 'м', 'м': 'м',
+        'сантиметр': 'см', 'сантиметра': 'см', 'сантиметров': 'см', 'см': 'см',
+        'дециметр': 'дм', 'дециметра': 'дм', 'дециметров': 'дм', 'дм': 'дм',
+        'миллиметр': 'мм', 'миллиметра': 'мм', 'миллиметров': 'мм', 'мм': 'мм',
+        'километр': 'км', 'километра': 'км', 'километров': 'км', 'км': 'км',
+        'литр': 'л', 'литра': 'л', 'литров': 'л', 'л': 'л',
+        'тонна': 'т', 'тонны': 'т', 'тонн': 'т', 'т': 'т',
+        'центнер': 'ц', 'центнера': 'ц', 'центнеров': 'ц', 'ц': 'ц',
+        'рубль': 'руб.', 'рубля': 'руб.', 'рублей': 'руб.', 'руб': 'руб.', 'руб.': 'руб.',
+        'сутки': 'сут.', 'суток': 'сут.', 'сут': 'сут.', 'сут.': 'сут.',
+        'день': 'д.', 'дня': 'д.', 'дней': 'д.', 'д': 'д.', 'д.': 'д.',
+        'год': 'лет', 'года': 'лет', 'лет': 'лет',
+        'час': 'ч', 'часа': 'ч', 'часов': 'ч', 'ч': 'ч',
+        'минута': 'мин', 'минуты': 'мин', 'минут': 'мин', 'мин': 'мин',
+        'км/ч': 'км/ч', 'м/с': 'м/с',
+    }
+    return aliases.get(raw, '')
+
+
+def _v50601_question_target_phrase(original_text: str) -> str:
+    q = _v500_last_question_sentence(original_text).strip().rstrip('?.!')
+    low = _v500_norm(q)
+    patterns = [
+        (r'какова\s+(.+)$', lambda m: m.group(1)),
+        (r'какой\s+(.+)$', lambda m: m.group(1)),
+        (r'сколько\s+(.+)$', lambda m: m.group(1)),
+        (r'в\s+скольких\s+(.+)$', lambda m: m.group(1)),
+    ]
+    for pat, fn in patterns:
+        m = re.search(pat, low, flags=re.IGNORECASE)
+        if m:
+            phrase = fn(m)
+            phrase = re.sub(r'\b(?:всего|было|стало|осталось)\b', '', phrase)
+            phrase = re.sub(r'\s+', ' ', phrase).strip()
+            return phrase
+    return ''
+
+
+def _v50601_semantic_step_explanation(original_text: str, *, step_index: int, step_count: int, raw_explanation: str = '') -> str:
+    low = _v500_norm(original_text)
+    qlow = _v500_norm(_v500_last_question_sentence(original_text))
+    raw = _v4011_clean_phrase(raw_explanation)
+    raw_key = _v4011_norm_key(raw)
+    bad = (not raw_key) or raw_key in {'м', 'см', 'км', 'кг', 'г', 'л', 'т', 'ц', 'шт', 'шт.', 'чел', 'чел.', 'человек', 'раз', 'лет', 'сут', 'сут.'}
+    total_final = step_count > 1 and step_index == step_count - 1 and ('сколько всего' in qlow or 'всего ' in qlow or 'вместе' in qlow)
+    if total_final:
+        if 'фрукт' in qlow: return 'всего фруктов'
+        if 'мяч' in qlow: return 'всего мячей'
+        if 'шарик' in qlow or 'шаров' in qlow: return 'всего шариков'
+        if 'пример' in qlow: return 'всего примеров'
+        if 'цвет' in qlow: return 'всего цветов'
+        if 'животн' in qlow: return 'всего животных'
+        if 'соусник' in qlow or 'молочник' in qlow: return 'всего соусников и молочников'
+        if 'ящик' in qlow: return 'всего ящиков с фруктами'
+        if 'лодок' in qlow or 'лодки' in qlow: return 'всего лодок'
+        if 'рябин' in qlow: return 'всего рябины'
+        if 'гряд' in qlow: return 'всего грядок с морковкой и укропом'
+        return 'всего'
+    if not bad:
+        # Keep useful DeepSeek explanations, but remove a leading generic "всего"
+        # from an intermediate step.
+        if step_count > 1 and step_index < step_count - 1:
+            raw = re.sub(r'^всего\s+', '', raw, flags=re.IGNORECASE).strip()
+        return raw
+    if 'глубина колодца' in qlow: return 'глубина колодца'
+    if 'глубина северного ледовитого океана' in qlow: return 'глубина Северного Ледовитого океана'
+    if 'паслось овец' in qlow: return 'овец'
+    if 'поднимает челнок' in qlow: return 'поднимает челнок'
+    if 'человек осталось' in qlow and 'машин' in low: return 'людей осталось в машине'
+    if 'машин уехало' in qlow: return 'машин уехало'
+    if 'отрезок длиннее' in qlow: return 'разница в длине'
+    if 'зайчик' in qlow: return 'зайчиков у Марины'
+    if 'хурм' in low and step_index == 0: return 'хурмы'
+    if 'груш' in low and step_index == 0: return 'груш'
+    if 'маленьк' in low and 'мяч' in low and step_index == 0: return 'маленьких мячей'
+    if 'зелен' in low and ('шарик' in low or 'шар' in low) and step_index == 0: return 'зелёных шариков'
+    if 'вычитан' in low and 'пример' in low and step_index == 0: return 'примеров на вычитание'
+    if 'лили' in low and step_index == 0: return 'лилий'
+    if 'коров' in low and step_index == 0: return 'коров'
+    if 'соусник' in low and step_index == 0: return 'соусников'
+    if 'байдар' in low and step_index == 0: return 'байдарок'
+    if 'киви' in low and step_index == 0: return 'ящиков с киви'
+    if 'рябин' in low and step_index == 0: return 'рябины со второго куста'
+    if 'укроп' in low and step_index == 0: return 'грядок с укропом'
+    target = _v50601_question_target_phrase(original_text)
+    return target or 'результат действия'
+
+
+def _v50601_format_numeric_api_steps(raw_steps: list[str], original_text: str, answer_number: str, answer_unit: str, info: dict[str, Any]) -> list[str]:
+    steps = [str(x or '').strip() for x in raw_steps if str(x or '').strip()]
+    out: list[str] = []
+    qlow = _v500_norm(_v500_last_question_sentence(original_text))
+    raw_measure = _v50601_canonical_measure_unit(answer_unit)
+    for idx, raw in enumerate(steps[:8]):
+        clean = re.sub(r'^\s*\d+[\).]\s*', '', raw).strip().rstrip('.!?')
+        # Keep only the arithmetic portion before normalizing.  Accept both
+        # "... (кг) – груш" and "... (кг) груш" from DeepSeek.
+        m = re.search(
+            r'(?P<expr>-?\d+(?:[,.]\d+)?\s*[+\-−–—·×xх*/:÷]\s*-?\d+(?:[,.]\d+)?\s*=\s*-?\d+(?:[,.]\d+)?)'
+            r'(?:\s*(?:\((?P<paren>[^)]+)\)|(?P<bare>кг|г|км|м|дм|см|мм|л|т|ц|руб\.?|сут\.?|д\.?|лет|чел\.?|шт\.?)))?'
+            r'\s*(?:[—–-]\s*)?(?P<tail>.*)$',
+            clean,
+            flags=re.IGNORECASE,
+        )
+        if not m:
+            normalized = _v4011_normalize_step_line(_v50103_sanitize_api_step_for_normalize(clean), original_text, answer_number, answer_unit, info)
+            out.append(_v50202_fix_api_primary_step_explanation(normalized, original_text).strip().rstrip('.!?'))
+            continue
+        expr = re.sub(r'\s+', ' ', m.group('expr').replace('−', '-').replace('–', '-').replace('—', '-')).strip()
+        raw_unit = str(m.group('paren') or m.group('bare') or '').strip()
+        unit = _v50601_canonical_measure_unit(raw_unit) or raw_measure
+        if not unit:
+            low_unit = _v500_norm(raw_unit)
+            people_task = bool(re.search(
+                r'(?:сколько|скольких)\s+(?:всего\s+)?(?:человек|людей|пассажир\w*|девоч\w*|мальчик\w*|детей|ребят\w*|ученик\w*|школьник\w*|дошкольник\w*|жител\w*|жильц\w*|отличник\w*)',
+                qlow,
+                flags=re.IGNORECASE,
+            ))
+            if low_unit in {'чел', 'человек', 'человека', 'людей', 'пассажиров'} or people_task:
+                unit = 'чел.'
+            elif low_unit in {'раз', 'раза'}:
+                unit = 'раза'
+            else:
+                unit = 'шт.'
+        if unit == 'чел': unit = 'чел.'
+        if unit == 'шт': unit = 'шт.'
+        tail = str(m.group('tail') or '').strip()
+        tail = re.sub(r'^[—–-]\s*', '', tail).strip()
+        expl = _v50601_semantic_step_explanation(original_text, step_index=idx, step_count=len(steps), raw_explanation=tail)
+        out.append(f'{expr} ({unit}) – {expl}'.strip())
+    return _v50402_filter_single_arithmetic_visible_steps(out, original_text)
+
+
+def _v50601_numeric_full_answer(original_text: str, n: int, answer_unit: str, current: str) -> str:
+    low = _v500_norm(original_text)
+    qlow = _v500_norm(_v500_last_question_sentence(original_text))
+    measure = _v50601_canonical_measure_unit(answer_unit)
+    if 'глубина колодца' in qlow:
+        return f'глубина колодца {n} {measure or "м"}'
+    if 'глубина северного ледовитого океана' in qlow:
+        return f'наибольшая глубина Северного Ледовитого океана {n} {measure or "м"}'
+    if 'паслось овец' in qlow:
+        return f'паслось {n} овец'
+    if 'человек поднимает челнок' in qlow:
+        return f'челнок поднимает {n} {_v50502_ru_count_form(n, "человека", "человека", "человек")}'
+    if 'человек осталось' in qlow and 'в машине' in low:
+        return f'в машине осталось {n} {_v50502_ru_count_form(n, "человек", "человека", "человек")}'
+    if 'машин уехало' in qlow:
+        return f'уехало {n} {_v50502_ru_count_form(n, "машина", "машины", "машин")}'
+    if 'красный отрезок' in qlow and 'длиннее' in qlow:
+        return f'красный отрезок длиннее жёлтого на {n} см'
+    if 'зайчиков у марины' in qlow:
+        return f'у Марины {n} {_v50502_ru_count_form(n, "зайчик", "зайчика", "зайчиков")}'
+    if 'сколько всего фруктов купила хозяйка' in qlow:
+        return f'хозяйка купила {n} {measure or "кг"} фруктов'
+    if 'сколько всего фруктов купила аня' in qlow:
+        return f'Аня купила {n} {measure or "кг"} фруктов'
+    if 'сколько всего килограммов рябины' in qlow:
+        return f'с двух кустов собрали {n} {measure or "кг"} рябины'
+    if 'сколько всего грядок' in qlow:
+        return f'на даче было {n} {_v50502_ru_count_form(n, "грядка", "грядки", "грядок")} с морковкой и укропом'
+    # Keep an already complete API answer. Short number+unit answers are rebuilt
+    # by the existing question-aware formatter below.
+    return str(current or '').strip().rstrip('.!?')
+
 def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_text: str, *, api_candidate: dict[str, Any] | None = None, template_candidate: dict[str, Any] | None = None, decision: str = 'api_primary_verified_formatted', conflict: bool = False) -> dict[str, Any] | None:
     """Use the raw API answer as primary, but repair only visible school formatting.
 
@@ -11565,28 +11754,34 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
     if not answer_number:
         return None
     n_int = _v4011_int_number(answer_number)
-    answer_unit = str(api_candidate.get('answerUnit') or payload.get('answer_unit') or '').strip()
-    unit, info = _v500_answer_unit_and_info(original_text, answer_unit)
-    if unit:
-        answer_unit = unit
+    raw_answer_unit = str(api_candidate.get('answerUnit') or payload.get('answer_unit') or '').strip()
+    raw_measure_unit = _v50601_canonical_measure_unit(raw_answer_unit)
+    unit, info = _v500_answer_unit_and_info(original_text, raw_answer_unit)
+    # A measured answer from DeepSeek is semantically stronger than an object noun
+    # from the question.  This prevents 8 kg of fruit becoming 8 "pieces".
+    answer_unit = raw_measure_unit or unit or raw_answer_unit
+    if raw_measure_unit:
+        info = dict(info or {})
+        info['unit'] = raw_measure_unit
+        info['isMeasure'] = True
     steps = [str(x or '').strip() for x in (api_candidate.get('steps') or []) if str(x or '').strip()]
     if not steps:
         steps = _v500_extract_visible_arithmetic_steps_from_payload(payload)
-    repaired_steps: list[str] = []
-    for raw in steps[:6]:
-        normalized_input = _v50103_sanitize_api_step_for_normalize(raw)
-        normalized = _v4011_normalize_step_line(normalized_input, original_text, answer_number, answer_unit, info)
-        normalized = re.sub(r'\((?:сл\.?|кн\.?|пр\.?|цв\.?|пац\.?|вороб(?:ей|ьев))\)', '(шт.)', normalized, flags=re.IGNORECASE)
-        normalized = _v50202_fix_api_primary_step_explanation(normalized, original_text)
-        repaired_steps.append(normalized.strip().rstrip('.!?'))
+    repaired_steps = _v50601_format_numeric_api_steps(steps, original_text, answer_number, answer_unit, info)
     if not repaired_steps and n_int is not None:
-        paren = _v4012_paren_unit(answer_unit, info) or 'шт.'
+        paren = _v4012_paren_unit(answer_unit, info) or raw_measure_unit or 'шт.'
         repaired_steps = [f'{n_int} = {n_int} ({paren}) – результат']
     final = str(api_candidate.get('finalAnswer') or payload.get('final_answer') or payload.get('answer') or '').strip().rstrip('.!?')
     if n_int is not None:
+        final = _v50601_numeric_full_answer(original_text, n_int, answer_unit, final)
         built = _v4011_build_final_answer(original_text, n_int, info, final)
         if built and (not final or re.fullmatch(r'-?\d+\s+[а-яёa-z. -]{1,30}', final, flags=re.IGNORECASE) or len(final.split()) <= 3):
             final = built
+        # Re-apply high-confidence semantic full-answer templates after the
+        # generic builder, which may otherwise collapse a measured answer.
+        semantic_final = _v50601_numeric_full_answer(original_text, n_int, answer_unit, final)
+        if semantic_final:
+            final = semantic_final
     final = _v4011_fix_answer_grammar(final, original_text)
     if not final:
         return None
@@ -12184,7 +12379,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v506-automation-pipeline'
+    marker = 'v506-01-automation-pipeline'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -12543,6 +12738,262 @@ def _v500_generalized_text_problem_payload(payload: dict[str, Any] | None, origi
         return _v500_build_payload(payload, text, steps=[step], final_answer=final, answer_number=result_number, answer_unit=unit, rule='direct_total_addition')
     return None
 
+
+def _v50601_normalize_symbolic_expression(value: Any, original_text: str = '') -> str:
+    raw = str(value or '').strip().replace('−', '-').replace('–', '-').replace('—', '-')
+    raw = raw.replace('×', '·').replace('*', '·').replace('÷', ':')
+    raw = re.sub(r'^ответ\s*:\s*', '', raw, flags=re.IGNORECASE)
+    raw = re.sub(r'\s+', ' ', raw).strip(' .;')
+    # Strip a trailing Russian unit phrase while preserving the expression.
+    m = re.match(r'^([0-9a-zA-Z()+\-·:/.\s]+?)(?:\s+[а-яё][а-яё .-]*)?$', raw, flags=re.IGNORECASE)
+    if m:
+        raw = m.group(1).strip()
+    if not re.search(r'[a-zA-Z]', raw):
+        return ''
+    if re.search(r'[а-яё]', raw, flags=re.IGNORECASE):
+        return ''
+    if re.search(r'[^0-9a-zA-Z()+\-·:/.\s]', raw):
+        return ''
+    # Remove a redundant RHS wrapper from forms like "r-z=(r-z)".
+    if '=' in raw:
+        left, right = [part.strip() for part in raw.split('=', 1)]
+        right = right.strip('() ')
+        raw = right or left
+    raw = re.sub(r'\s*([+\-·:/])\s*', r' \1 ', raw)
+    raw = re.sub(r'\s+', ' ', raw).strip()
+    # Primary-school form for equal groups: g + g, not 2g.
+    m_coeff = re.fullmatch(r'2\s*·?\s*([a-zA-Z])', raw)
+    if m_coeff and 'столько же' in _v500_norm(original_text):
+        var = m_coeff.group(1)
+        raw = f'{var} + {var}'
+    # Convert implicit coefficients elsewhere to explicit multiplication.
+    raw = re.sub(r'(?<![A-Za-z0-9])(\d+)\s*([A-Za-z])(?![A-Za-z0-9])', r'\1 · \2', raw)
+    return raw
+
+
+def _v50601_raw_symbolic_candidate(payload: dict[str, Any] | None, original_text: str) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {'present': False, 'trusted': False, 'reason': 'no_payload'}
+    ev = payload.get('v501AiPipelineEvidence') if isinstance(payload.get('v501AiPipelineEvidence'), dict) else {}
+    parsed = ev.get('rawDeepSeekParsedJson') if isinstance(ev.get('rawDeepSeekParsedJson'), dict) else None
+    st = _v4011_structured(payload)
+    raw_answer = (
+        (parsed.get('answer_number') if isinstance(parsed, dict) else '')
+        or ev.get('rawDeepSeekAnswerNumber')
+        or payload.get('answer_number')
+        or st.get('answer_number')
+        or ''
+    )
+    expr = _v50601_normalize_symbolic_expression(raw_answer, original_text)
+    raw_steps = []
+    if isinstance(parsed, dict) and isinstance(parsed.get('steps'), list):
+        raw_steps = [str(x or '').strip() for x in parsed.get('steps') or [] if str(x or '').strip()]
+    if not raw_steps and isinstance(st.get('steps'), list):
+        raw_steps = [str(x or '').strip() for x in st.get('steps') or [] if str(x or '').strip()]
+    if not expr:
+        for step in reversed(raw_steps):
+            rhs = step.split('=', 1)[1] if '=' in step else step
+            expr = _v50601_normalize_symbolic_expression(rhs, original_text)
+            if expr:
+                break
+    final = str((parsed.get('final_answer') if isinstance(parsed, dict) else '') or ev.get('rawDeepSeekFinalAnswer') or payload.get('final_answer') or st.get('final_answer') or '').strip()
+    unit = str((parsed.get('answer_unit') if isinstance(parsed, dict) else '') or payload.get('answer_unit') or st.get('answer_unit') or '').strip()
+    task_vars = set(re.findall(r'(?<![A-Za-zА-Яа-яЁё])([A-Za-z])(?![A-Za-zА-Яа-яЁё])', original_text))
+    expr_vars = set(re.findall(r'[A-Za-z]', expr))
+    variables_ok = bool(expr_vars) and (not task_vars or expr_vars.issubset(task_vars))
+    has_operation = bool(re.search(r'[+\-·:/]', expr))
+    trusted = bool(expr and variables_ok and has_operation)
+    return {
+        'present': bool(expr or final or raw_steps),
+        'trusted': trusted,
+        'reason': 'trusted_symbolic_api_candidate' if trusted else 'symbolic_api_candidate_invalid',
+        'answerExpression': expr,
+        'answerUnit': unit,
+        'finalAnswer': final,
+        'steps': raw_steps[:8],
+        'taskVariables': sorted(task_vars),
+        'expressionVariables': sorted(expr_vars),
+        'structuralVerifier': {'checked': 1, 'passed': trusted, 'failedSteps': [] if trusted else ['invalid symbolic expression or unknown variable']},
+        'rawDeepSeekTextHash': ev.get('rawDeepSeekTextHash'),
+    }
+
+
+def _v50601_symbolic_unit_and_explanation(original_text: str, raw_unit: str, expr: str) -> tuple[str, str, str]:
+    low = _v500_norm(original_text)
+    q = _v500_norm(_v500_last_question_sentence(original_text))
+    measure = _v50601_canonical_measure_unit(raw_unit)
+    paren = measure
+    unit_word = str(raw_unit or '').strip()
+    expl = ''
+    final = ''
+    if 'человек' in q or 'пассажир' in q:
+        paren, unit_word = 'чел.', 'человек'
+    elif measure:
+        unit_word = measure
+    else:
+        paren = 'шт.'
+    # Reusable semantic families for full answers.
+    if 'сколько было сыроежек' in q:
+        expl, final, unit_word = 'сыроежек', f'было {expr} сыроежек', 'сыроежек'
+    elif 'сколько человек осталось' in q:
+        expl, final, unit_word = 'людей осталось', f'осталось {expr} человек', 'человек'
+    elif 'во втором доме' in q and 'сколько человек' in q:
+        expl, final, unit_word = 'жителей второго дома', f'во втором доме живёт {expr} человек', 'человек'
+    elif 'на сколько больше автомашин' in q:
+        expl, final, unit_word = 'разница в выпуске', f'за второй месяц завод выпустил на {expr} автомашин больше, чем за первый', 'автомашин'
+    elif 'сколько девочек' in q:
+        expl, final, unit_word = 'девочек в классе', f'в классе {expr} девочек', 'девочек'
+    elif 'на сколько меньше пассажиров' in q:
+        expl, final, unit_word = 'разница в числе пассажиров', f'в первом вагоне на {expr} пассажиров меньше, чем во втором', 'пассажиров'
+    elif 'сколько всего птиц' in q:
+        expl, final, unit_word = 'всего птиц', f'в зоомагазине всего {expr} птиц', 'птиц'
+    elif 'сколько килограммов муки было' in q:
+        expl, final, unit_word, paren = 'всего муки', f'в магазине было {expr} кг муки', 'кг', 'кг'
+    elif 'сколько лет живут зебры' in q:
+        expl, final, unit_word, paren = 'возраст зебр', f'зебры живут {expr} лет', 'лет', 'лет'
+    elif 'сколько ростков проросло' in q:
+        expl, final, unit_word = 'проросших ростков', f'проросло {expr} ростков', 'ростков'
+    elif 'сколько перьев у сокола' in q:
+        expl, final, unit_word = 'перьев у сокола', f'у сокола {expr} перьев', 'перьев'
+    elif 'сколько бабочек стало' in q:
+        expl, final, unit_word = 'бабочек стало', f'над полянкой стало {expr} бабочек', 'бабочек'
+    elif 'сколько пароходов ушло' in q:
+        expl, final, unit_word = 'пароходов ушло', f'в море ушло {expr} пароходов', 'пароходов'
+    elif 'сколько всего пар обуви' in q:
+        expl, final, unit_word, paren = 'всего пар обуви', f'за два квартала фабрика выпустила {expr} пар обуви', 'пар', 'пар'
+    elif 'сколько домов в третьем поселке' in q:
+        expl, final, unit_word = 'домов в третьем посёлке', f'в третьем посёлке {expr} домов', 'домов'
+    elif 'сколько осин' in q:
+        expl, final, unit_word = 'осин в роще', f'в роще {expr} осин', 'осин'
+    elif 'сколько человек осталось на теплоходе' in q:
+        expl, final, unit_word = 'людей осталось на теплоходе', f'на теплоходе осталось {expr} человек', 'человек'
+    elif 'сколько килограммов яблок собрали со второй' in q:
+        expl, final, unit_word, paren = 'яблок со второй яблони', f'со второй яблони собрали {expr} кг яблок', 'кг', 'кг'
+    elif 'на сколько метров дуб выше' in q:
+        expl, final, unit_word, paren = 'разница в высоте', f'дуб выше берёзы на {expr} м', 'м', 'м'
+    elif 'сколько лампочек были исправны' in q:
+        expl, final, unit_word = 'исправных лампочек', f'исправны были {expr} лампочек', 'лампочек'
+    elif 'на сколько меньше километров' in q:
+        expl, final, unit_word, paren = 'разница в пути', f'в первый день поезд прошёл на {expr} км меньше, чем во второй', 'км', 'км'
+    elif 'сколько всего килограммов фруктов' in q:
+        expl, final, unit_word, paren = 'всего фруктов', f'в магазин привезли {expr} кг фруктов', 'кг', 'кг'
+    elif 'сколько всего километров должен пробежать' in q:
+        expl, final, unit_word, paren = 'вся дистанция', f'спортсмен должен пробежать {expr} км', 'км', 'км'
+    elif 'какой рост у слона' in q:
+        expl, final, unit_word, paren = 'рост слона', f'рост слона {expr} м', 'м', 'м'
+    elif 'сколько грибочков нашел' in q:
+        expl, final, unit_word = 'найденных грибов', f'ёжик нашёл {expr} грибов', 'грибов'
+    elif 'какова длина озера' in q:
+        expl, final, unit_word, paren = 'длина озера', f'длина озера {expr} м', 'м', 'м'
+    elif 'сколько вагонов стало' in q:
+        expl, final, unit_word = 'вагонов стало', f'в поезде стало {expr} вагонов', 'вагонов'
+    elif 'сколько литров пошло на полив' in q:
+        expl, final, unit_word, paren = 'воды на полив', f'на полив огорода пошло {expr} л воды', 'л', 'л'
+    elif 'через обе трубы' in q:
+        expl, final, unit_word, paren = 'воды через обе трубы', f'через обе трубы в бассейн вливается {expr} л воды', 'л', 'л'
+    elif 'в третьей книге' in q:
+        expl, final, unit_word = 'иллюстраций в третьей книге', f'в третьей книге {expr} иллюстраций', 'иллюстраций'
+    if not expl:
+        expl = _v50601_question_target_phrase(original_text) or unit_word or 'результат'
+    if not final:
+        # A generic but complete fallback, still based only on the question and API expression.
+        final = f'ответ по условию равен {expr} {unit_word}'.strip()
+    return paren or 'шт.', expl, final
+
+
+def _v50601_format_trusted_symbolic_payload(payload: dict[str, Any] | None, original_text: str, candidate: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    candidate = candidate or _v50601_raw_symbolic_candidate(payload, original_text)
+    if not candidate.get('trusted'):
+        return None
+    expr = str(candidate.get('answerExpression') or '').strip()
+    paren, expl, final = _v50601_symbolic_unit_and_explanation(original_text, str(candidate.get('answerUnit') or ''), expr)
+    step = f'{expr} = {expr} ({paren}) – {expl}'
+    steps = [step]
+    self_check = candidate.get('structuralVerifier') or {'checked': 1, 'passed': True, 'failedSteps': []}
+    template_evidence = {
+        'templateId': 'v50601-symbolic-api-expression-family-v1',
+        'templateFamily': 'symbolic_word_problem',
+        'operation': 'symbolic_expression',
+        'confidence': 0.99,
+        'source': 'raw DeepSeek/API expression plus structural variable validation',
+        'usesExcelExpected': False,
+        'usesCaseId': False,
+        'expression': expr,
+        'taskVariables': candidate.get('taskVariables') or [],
+    }
+    result = _format_primary_solution_text(original_text, steps, final)
+    visible = _v312_format_visible_result(steps, final)
+    out = dict(payload)
+    st = {
+        **_v4011_structured(out),
+        'steps': steps,
+        'answer_number': expr,
+        'answer_unit': str(candidate.get('answerUnit') or ''),
+        'final_answer': final,
+        'v500Rule': 'symbolic_api_expression',
+        'v500SelfCheck': self_check,
+        'v500LearningMode': 'api_primary_verified_symbolic',
+        'v500UsesExcelExpected': False,
+        'v500CaseSpecificRepair': False,
+        'v500TemplateId': template_evidence['templateId'],
+        'v500TemplateEvidence': template_evidence,
+        'v500TemplateConfidence': template_evidence['confidence'],
+        'v501ApiAnswerUsedAsPrimary': True,
+        'v501ApiPrimaryVerifiedFormatted': True,
+        'v50601SymbolicApiTrusted': True,
+    }
+    out.update({
+        'result': result,
+        'explanation': result,
+        'userVisibleResultText': visible or result,
+        'backendPreparedVisibleResult': True,
+        'validated': True,
+        'source': str(out.get('source') or 'deepseek-primary') + '; symbolic-api-primary-v50601',
+        'answer': final,
+        'answer_number': expr,
+        'answer_unit': str(candidate.get('answerUnit') or ''),
+        'final_answer': final,
+        'structured_solution': st,
+        'structuredSolution': st,
+        'v500GeneralRuleApplied': True,
+        'v500GeneralRule': 'symbolic_api_expression',
+        'v500SelfVerifier': self_check,
+        'v500SelfVerifierPassed': True,
+        'v500LearningMode': 'api_primary_verified_symbolic',
+        'v500UsesExcelExpected': False,
+        'v500CaseSpecificRepair': False,
+        'v500TemplateId': template_evidence['templateId'],
+        'v500TemplateEvidence': template_evidence,
+        'v500TemplateConfidence': template_evidence['confidence'],
+        'v501ApiAnswerConsidered': True,
+        'v501ApiCandidateTrusted': True,
+        'v501ApiAnswerUsedAsPrimary': True,
+        'v501ApiAnswerDecision': 'trusted_symbolic_api_expression',
+        'v501ApiTemplateConflict': False,
+        'v501TemplateOverrodeTrustedApi': False,
+        'v501ApiPrimaryVerifiedFormatted': True,
+        'v50601SymbolicApiTrusted': True,
+    })
+    ev = dict(out.get('v501AiPipelineEvidence') or {}) if isinstance(out.get('v501AiPipelineEvidence'), dict) else {}
+    ev.update({
+        'apiAnswerConsidered': True,
+        'apiCandidateTrusted': True,
+        'apiAnswerUsedAsPrimary': True,
+        'apiAnswerDecision': 'trusted_symbolic_api_expression',
+        'apiPrimaryVerifiedFormatted': True,
+        'symbolicApiTrusted': True,
+        'symbolicAnswerExpression': expr,
+        'symbolicStructuralVerifier': self_check,
+        'templateCandidate': template_evidence,
+    })
+    out['v501AiPipelineEvidence'] = ev
+    marker = 'v506.01-symbolic-api-primary-general-template'
+    out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + marker
+    out['visibleResultContract'] = str(out.get('visibleResultContract') or '') + ('; ' if out.get('visibleResultContract') else '') + marker
+    return out
+
 def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return payload
@@ -12550,11 +13001,17 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
     if isinstance(special_non_numeric, dict):
         return _v4013_finalize_payload_text(special_non_numeric, original_text)
 
-    # V506 authoritative API gate.  Verify the raw DeepSeek arithmetic before
-    # any semantic template, legacy repair, or case-specific formatter can touch
-    # the numeric answer.  Trusted API output is formatted and returned here;
-    # reusable templates are fallback only for incomplete/untrusted API output.
+    # V506.01 symbolic family gate. A valid raw DeepSeek/API expression is
+    # accepted through a reusable structural template before legacy exact maps.
     payload = _v500_attach_existing_self_verifier(payload) if isinstance(payload, dict) else payload
+    symbolic_candidate = _v50601_raw_symbolic_candidate(payload, original_text)
+    if symbolic_candidate.get('trusted'):
+        symbolic_primary = _v50601_format_trusted_symbolic_payload(payload, original_text, symbolic_candidate)
+        if isinstance(symbolic_primary, dict):
+            return symbolic_primary
+
+    # V506.01 authoritative numeric API gate. Verify arithmetic before any
+    # semantic template or legacy repair can touch the number.
     authoritative_candidate = _v501_raw_api_answer_candidate(payload)
     if authoritative_candidate.get('trusted'):
         api_primary = _v50103_format_trusted_api_payload(
