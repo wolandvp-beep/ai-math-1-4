@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v505_03_automation_pipeline'
-SOLVER_VERSION = 'v505-03-automation-pipeline'
+APP_RELEASE = 'v505_04_automation_pipeline'
+SOLVER_VERSION = 'v505-04-automation-pipeline'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -661,6 +661,13 @@ def _v501_finish_postprocess_evidence(payload: dict | None, *, before: dict[str,
         'templateCandidate': ('v501TemplateCandidate', 'templateCandidate'),
         'apiScaleNormalized': ('v501ApiScaleNormalized', 'apiScaleNormalized'),
         'apiPrimaryVerifiedFormatted': ('v501ApiPrimaryVerifiedFormatted', 'apiPrimaryVerifiedFormatted'),
+        'trustedApiAuthoritative': ('v50503TrustedApiAuthoritative', 'trustedApiAuthoritative'),
+        'trustedApiNumericLock': ('v50503TrustedApiNumericLock', 'trustedApiNumericLock'),
+        'trustedApiAnswerNumber': ('v50503TrustedApiAnswerNumber', 'trustedApiAnswerNumber'),
+        'trustedApiNumberBeforeFormatting': ('v50503TrustedApiNumberBeforeFormatting', 'trustedApiNumberBeforeFormatting'),
+        'trustedApiNumberAfterFormatting': ('v50503TrustedApiNumberAfterFormatting', 'trustedApiNumberAfterFormatting'),
+        'trustedApiNumberPreserved': ('v50503TrustedApiNumberPreserved', 'trustedApiNumberPreserved'),
+        'trustedApiOverrideBlocked': ('v50503TrustedApiOverrideBlocked', 'trustedApiOverrideBlocked'),
     }
     for out_key, candidates in arbitration_map.items():
         for key in candidates:
@@ -10615,7 +10622,7 @@ def _v501_last_step_result_number(steps: list[str]) -> str:
 def _v501_raw_api_answer_candidate(payload: dict[str, Any] | None) -> dict[str, Any]:
     """Build the authoritative numeric candidate from raw DeepSeek/API.
 
-    V505.03 policy: once the API answer has a verified arithmetic chain and its
+    V505.04 policy: once the API answer has a verified arithmetic chain and its
     final number agrees with that chain, the numeric answer is authoritative.
     Templates and postprocess may improve school formatting, but may not replace
     that number. Untrusted/incomplete API output may still use reusable templates
@@ -10714,7 +10721,7 @@ def _v501_record_api_template_decision(out: dict[str, Any], *, api_candidate: di
         'templateCandidate': template_candidate,
         'templateOverrodeTrustedApi': bool(conflict and api_candidate.get('trusted') and not api_used),
         'apiProtectedFromTemplateOverride': bool(conflict and api_candidate.get('trusted') and api_used),
-        'decisionPolicy': 'V505.03: a self-consistent DeepSeek/API numeric answer is authoritative. Templates and postprocess may format or verify it, but may not replace it; templates are fallback only when API output is not trusted.',
+        'decisionPolicy': 'V505.04: a self-consistent DeepSeek/API numeric answer is authoritative. Templates and postprocess may format or verify it, but may not replace it; templates are fallback only when API output is not trusted.',
     }
     evidence.update(record)
     out['v501AiPipelineEvidence'] = evidence
@@ -10983,6 +10990,272 @@ def _v50402_filter_single_arithmetic_visible_steps(steps: list[str], original_te
             break
     return [direct[0]] if pseudo_ok else clean_steps
 
+
+def _v50504_people_movement_visible_text(original_text: str, number: int) -> tuple[str, str, str] | None:
+    """Build a full visible answer for reusable people-movement questions.
+
+    This is a question-shape formatter only: it never computes or changes the
+    answer number.  It fixes bare dash tails such as ``– человек`` while keeping
+    the verified DeepSeek/API number authoritative.
+    """
+    question = _v500_norm(_v500_last_question_sentence(original_text)).rstrip(' .!?')
+    task = _v500_norm(original_text)
+    match = re.search(
+        r'сколько\s+человек\s+(вышли|пришли|вошли|ушли|сошли)(?:\s+(.+))?$',
+        question,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    verb = match.group(1)
+    explicit_context = _v4011_clean_phrase(match.group(2) or '').strip(' .?!')
+    people = _v50502_ru_count_form(number, 'человек', 'человека', 'человек')
+
+    if verb == 'вышли':
+        if explicit_context:
+            context = explicit_context
+        elif 'автобус' in task:
+            context = 'из автобуса'
+        elif 'трамва' in task:
+            context = 'из трамвая'
+        elif 'вертолет' in task or 'вертолёт' in task:
+            context = 'из вертолёта'
+        else:
+            context = ''
+        final = f'{context} вышли {number} {people}'.strip()
+        explanation = f'вышедших {context}'.strip()
+    elif verb == 'пришли':
+        context = explicit_context
+        if not context and 'спортивн' in task and 'зал' in task:
+            context = 'в спортивный зал'
+        final = f'{context} пришли {number} {people}'.strip()
+        explanation = f'пришедших {context}'.strip()
+    elif verb == 'вошли':
+        context = explicit_context
+        if not context and 'автобус' in task:
+            context = 'в автобус'
+        final = f'{context} вошли {number} {people}'.strip()
+        explanation = f'вошедших {context}'.strip()
+    elif verb == 'сошли':
+        context = explicit_context
+        final = f'{context} сошли {number} {people}'.strip()
+        explanation = f'сошедших {context}'.strip()
+    else:
+        context = explicit_context
+        final = f'{context} ушли {number} {people}'.strip()
+        explanation = f'ушедших {context}'.strip()
+
+    explanation = _v4011_clean_phrase(explanation) or 'изменение количества людей'
+    return final, explanation, 'чел.'
+
+
+def _v50504_is_short_comparison_answer(answer: str) -> bool:
+    clean = _v500_norm(str(answer or '').strip().rstrip('.!?'))
+    if not clean:
+        return True
+    words = [word for word in clean.split() if word]
+    return bool(re.match(r'^на\s+-?\d+(?:[,.]\d+)?\b', clean)) and len(words) <= 6
+
+
+def _v50504_comparison_quantity(number: int, question: str, measure_hint: str = '', answer_unit: str = '') -> tuple[str, str, str]:
+    """Return (visible quantity phrase, parenthesized unit, semantic explanation)."""
+    q = _v500_norm(question)
+    hint = _v500_norm(measure_hint or answer_unit)
+
+    # SI/time measures use the school abbreviations requested by the project.
+    if hint in {'метр', 'метра', 'метров', 'м'} or ('обхват' in q and re.search(r'\bм\b|метр', _v500_norm(answer_unit))):
+        return 'м', 'м', 'разница в обхвате стволов' if 'обхват' in q else 'разница в длине'
+    if hint in {'сантиметр', 'сантиметра', 'сантиметров', 'см'} or ('длина' in q and 'отрез' in q):
+        return 'см', 'см', 'разница в длине'
+    if hint in {'километр', 'километра', 'километров', 'км'}:
+        return 'км', 'км', 'разница в длине'
+    if hint in {'килограмм', 'килограмма', 'килограммов', 'кг'}:
+        return 'кг', 'кг', 'разница в массе'
+    if hint in {'час', 'часа', 'часов', 'ч'}:
+        return _v50502_ru_count_form(number, 'час', 'часа', 'часов'), 'ч', 'разница во времени'
+    if hint in {'день', 'дня', 'дней', 'д'}:
+        return _v50502_ru_count_form(number, 'день', 'дня', 'дней'), 'д.', 'разница во времени'
+    if hint in {'год', 'года', 'годов', 'лет'} or 'сколько лет' in q:
+        return _v50502_ru_count_form(number, 'год', 'года', 'лет'), 'лет', 'разница в продолжительности жизни'
+
+    semantic_forms = (
+        (('куст',), ('куст', 'куста', 'кустов'), 'разница в количестве кустов'),
+        (('снегир', 'вороб'), ('птицу', 'птицы', 'птиц'), 'разница в количестве птиц'),
+        (('коров', 'бык', 'животн'), ('животное', 'животных', 'животных'), 'разница в количестве животных'),
+        (('морей', 'море', 'океан'), ('море', 'моря', 'морей'), 'разница в количестве морей'),
+        (('ящик',), ('ящик', 'ящика', 'ящиков'), 'разница в количестве ящиков'),
+        (('попадан',), ('попадание', 'попадания', 'попаданий'), 'разница в количестве попаданий'),
+        (('тюльпан',), ('тюльпан', 'тюльпана', 'тюльпанов'), 'разница в количестве тюльпанов'),
+        (('гриб',), ('гриб', 'гриба', 'грибов'), 'разница в количестве грибов'),
+        (('книг', 'книга'), ('книгу', 'книги', 'книг'), 'разница в количестве книг'),
+        (('зуб',), ('зуб', 'зуба', 'зубов'), 'разница в количестве зубов'),
+        (('издани', 'журнал', 'газет'), ('издание', 'издания', 'изданий'), 'разница в количестве изданий'),
+        (('рак',), ('рак', 'рака', 'раков'), 'разница в количестве раков'),
+    )
+    combined = f'{q} {hint}'
+    for stems, forms, explanation in semantic_forms:
+        if any(stem in combined for stem in stems):
+            return _v50502_ru_count_form(number, *forms), 'шт.', explanation
+
+    unit_word = _v4011_plural(number, answer_unit or measure_hint)
+    if unit_word and _v500_norm(unit_word) not in {'', 'шт', 'шт.'}:
+        return unit_word, 'шт.', f'разница в количестве {unit_word}'
+    return '', 'шт.', 'разница в количестве предметов'
+
+
+def _v50504_comparison_visible_text(original_text: str, number: int, answer_unit: str = '') -> tuple[str, str, str] | None:
+    """Expand short ``На N ...`` answers into full reusable comparison phrases.
+
+    The function parses the question grammar and context; it is not keyed by an
+    Excel row/case id and never derives the numeric answer from Excel expected.
+    """
+    question_raw = _v500_last_question_sentence(original_text).strip().rstrip('.!?')
+    question = _v500_norm(question_raw)
+    if not question.startswith('на сколько'):
+        return None
+
+    # Lifespan/age comparisons have the direction after the subject/verb.
+    life_match = re.match(
+        r'^на\s+сколько\s+лет\s+(.+?)\s+жив(?:е|ё)т\s+(меньше|больше|дольше|короче)\s+(.+)$',
+        question,
+        flags=re.IGNORECASE,
+    )
+    if life_match:
+        subject, direction, other = life_match.groups()
+        years = _v50502_ru_count_form(number, 'год', 'года', 'лет')
+        return f'{subject} живёт на {number} {years} {direction} {other}', 'разница в продолжительности жизни', 'лет'
+
+    age_match = re.match(
+        r'^на\s+сколько\s+лет\s+(.+?)\s+(старше|моложе)\s+(.+)$',
+        question,
+        flags=re.IGNORECASE,
+    )
+    if age_match:
+        subject, direction, other = age_match.groups()
+        years = _v50502_ru_count_form(number, 'год', 'года', 'лет')
+        return f'{subject} на {number} {years} {direction} {other}', 'разница в возрасте', 'лет'
+
+    # Questions with a measure/object immediately after «на сколько»:
+    # «На сколько тюльпанов меньше ...», «На сколько метров больше ...».
+    measured = re.match(
+        r'^на\s+сколько\s+([а-яёa-z.\-]+)\s+(больше|меньше|дольше|короче|выше|ниже|шире|уже)\s+(.+)$',
+        question,
+        flags=re.IGNORECASE,
+    )
+    if measured:
+        measure, direction, body = measured.groups()
+        quantity, paren_unit, explanation = _v50504_comparison_quantity(number, question, measure, answer_unit)
+        numeric_phrase = f'{number} {quantity}'.strip()
+        lhs, separator, rhs = body.partition(', чем ')
+        lhs = _v4011_clean_phrase(lhs)
+        rhs = _v4011_clean_phrase(rhs) if separator else ''
+        if lhs.startswith(('в ', 'во ', 'на ', 'у ')):
+            final = f'{lhs} на {numeric_phrase} {direction}'
+        else:
+            final = f'{lhs} на {numeric_phrase} {direction}'
+        if rhs:
+            if lhs.startswith('обхват ствола') and not rhs.startswith('обхват'):
+                rhs = f'обхват ствола {rhs}'
+            final += f', чем {rhs}'
+        return final, explanation, paren_unit
+
+    direct = re.match(
+        r'^на\s+сколько\s+(больше|меньше|дольше|короче|выше|ниже|шире|уже)\s+(.+)$',
+        question,
+        flags=re.IGNORECASE,
+    )
+    if not direct:
+        return None
+    direction, body = direct.groups()
+    quantity, paren_unit, explanation = _v50504_comparison_quantity(number, question, '', answer_unit)
+    numeric_phrase = f'{number} {quantity}'.strip()
+    lhs, separator, rhs = body.partition(', чем ')
+    lhs = _v4011_clean_phrase(lhs)
+    rhs = _v4011_clean_phrase(rhs) if separator else ''
+
+    # Predicate/location patterns are reordered into natural declarative answers.
+    if rhs:
+        rhs_action = re.match(r'^(.+?)\s+(привезли|принесли|поставили|посадили)\s+((?:в|во|на)\s+.+)$', rhs)
+        if rhs_action:
+            rhs_object, verb, location = rhs_action.groups()
+            base_noun = lhs.split()[0] if lhs.split() else ''
+            if base_noun and rhs_object.startswith(('с ', 'со ')):
+                rhs_object = f'{base_noun} {rhs_object}'
+            final = f'{location} {verb} {lhs} на {numeric_phrase} {direction}, чем {rhs_object}'
+            return final, explanation, paren_unit
+
+        grazing = re.match(r'^(паслось|паслись)\s+((?:в|во|на)\s+.+?)\s+([а-яёa-z-]+)$', lhs)
+        if grazing:
+            verb, location, subject = grazing.groups()
+            final = f'{location} {subject} {verb} на {numeric_phrase} {direction}, чем {rhs}'
+            return final, explanation, paren_unit
+
+        had_by = re.match(r'^(.+?)\s+было\s+у\s+(.+)$', lhs)
+        if had_by:
+            _object, subject = had_by.groups()
+            final = f'у {subject} было на {numeric_phrase} {direction}, чем {rhs}'
+            return final, explanation, paren_unit
+
+        found_by = re.match(r'^([а-яёa-z-]+)\s+(нашла|нашел|нашёл)\s+(.+)$', lhs)
+        if found_by:
+            _object, verb, subject = found_by.groups()
+            final = f'{subject} {verb} на {numeric_phrase} {direction}, чем {rhs}'
+            return final, explanation, paren_unit
+
+        object_by = re.match(r'^([а-яёa-z-]+)\s+у\s+(.+)$', lhs)
+        if object_by:
+            _object, subject = object_by.groups()
+            final = f'у {subject} на {numeric_phrase} {direction}, чем {rhs}'
+            return final, explanation, paren_unit
+
+        location_count = re.match(r'^([а-яёa-z-]+)\s+((?:в|во|на)\s+.+)$', lhs)
+        if location_count:
+            _object, location = location_count.groups()
+            final = f'{location} на {numeric_phrase} {direction}, чем {rhs}'
+            return final, explanation, paren_unit
+
+        action = re.match(r'^(.+?)\s+(выписывает|читает|собирает|покупает)\s+([а-яёa-z-]+)$', lhs)
+        if action:
+            subject, verb, obj = action.groups()
+            final = f'{subject} {verb} на {numeric_phrase} {direction} {obj}, чем {rhs}'
+            return final, explanation, paren_unit
+
+        if lhs.startswith('длина '):
+            rhs_full = rhs
+            if len(rhs.split()) == 1 and 'отрез' in lhs:
+                rhs_full = f'длины {rhs} отрезка'
+            final = f'{lhs} на {numeric_phrase} {direction}, чем {rhs_full}'
+            return final, 'разница в длине', paren_unit
+
+        final = f'{lhs} на {numeric_phrase} {direction}, чем {rhs}'
+        return final, explanation, paren_unit
+
+    # Comparison without explicit «чем»: recover the second named location from
+    # the condition, e.g. two oceans in the statement and one in the question.
+    if 'океан' in body and 'мор' in body:
+        target_match = re.search(r'в\s+([а-яё-]+)\s+океане', body)
+        named = re.findall(r'в\s+([А-ЯЁа-яё-]+)\s+океане', original_text, flags=re.IGNORECASE)
+        target = target_match.group(1) if target_match else ''
+        other = next((name for name in named if _v500_norm(name) != _v500_norm(target)), '')
+        target_raw = next((name for name in named if _v500_norm(name) == _v500_norm(target)), target)
+        final = f'в {target_raw} океане на {numeric_phrase} {direction}'
+        if other:
+            final += f', чем в {other} океане'
+        return final, 'разница в количестве морей', 'шт.'
+
+    if lhs.startswith('длина '):
+        # Recover the second compared segment from the condition when the
+        # question omits an explicit «чем ...».
+        target_match = re.search(r'длина\s+([а-яё-]+)\s+отрезка', lhs)
+        target = target_match.group(1) if target_match else ''
+        colours = re.findall(r'(?:длина\s+)?([А-ЯЁа-яё-]+)(?:\s+отрезка)?\s+(?:-?\d+\s*см|—\s*\d+\s*см)', original_text, flags=re.IGNORECASE)
+        other = next((value for value in colours if _v500_norm(value) != _v500_norm(target)), '')
+        final = f'{lhs} на {numeric_phrase} {direction}'
+        if other:
+            final += f' длины {other} отрезка'
+        return final, 'разница в длине', paren_unit
+    return f'{lhs} на {numeric_phrase} {direction}', explanation, paren_unit
+
 def _v50401_general_visible_answer_and_step_fix(out: dict[str, Any] | None, original_text: str) -> dict[str, Any] | None:
     """General V505 UI-quality repair for recurring question patterns.
 
@@ -11216,10 +11489,36 @@ def _v50401_general_visible_answer_and_step_fix(out: dict[str, Any] | None, orig
             paren_unit = 'шт.'
             final = f'мама купила {dat} {n} {obj}'.strip()
 
+    # V505.04: fix recurring people-movement UI tails without changing the
+    # trusted API number.
+    if not final:
+        people_visible = _v50504_people_movement_visible_text(original_text, n)
+        if people_visible is not None:
+            final, expl, paren_unit = people_visible
+
+    # V505.04: expand short comparison answers (``На N ...``) into full school
+    # phrases.  This uses only the question grammar/context and the already
+    # verified API number; Excel expected and case ids are not consulted.
+    if not final:
+        current_visible_answer = str(
+            out.get('final_answer')
+            or out.get('answer')
+            or structured.get('final_answer')
+            or ''
+        )
+        if _v50504_is_short_comparison_answer(current_visible_answer):
+            comparison_visible = _v50504_comparison_visible_text(
+                original_text,
+                n,
+                str(out.get('answer_unit') or structured.get('answer_unit') or ''),
+            )
+            if comparison_visible is not None:
+                final, expl, paren_unit = comparison_visible
+
     if not final:
         return out
 
-    final = _v4011_fix_answer_grammar(final, original_text).strip().rstrip('.!?')
+    final = _v4011_fix_answer_grammar(final, original_text).replace('ларек', 'ларёк').strip().rstrip('.!?')
     steps = structured.get('steps') if isinstance(structured.get('steps'), list) else []
     fixed_steps = [_v50401_replace_step_explanation(str(step or ''), expl, paren_unit=paren_unit) for step in steps]
     if not fixed_steps:
@@ -11244,7 +11543,7 @@ def _v50401_general_visible_answer_and_step_fix(out: dict[str, Any] | None, orig
         'structuredSolution': st,
         'v50401VisibleUiQualityGeneralFix': True,
     })
-    marker = 'v504.02-visible-ui-quality-general-fix'
+    marker = 'v505.04-visible-ui-quality-general-fix'
     fixed['verifier'] = str(fixed.get('verifier') or '') + ('; ' if fixed.get('verifier') else '') + marker
     contract = str(fixed.get('visibleResultContract') or '').strip()
     if marker not in contract:
@@ -11338,7 +11637,7 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
         'v50503TrustedApiAnswerNumber': answer_number,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v505-03-api-authoritative-verified-formatted'
+    marker = 'v505-04-api-authoritative-verified-formatted'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     verifier = str(out.get('verifier') or '')
@@ -11824,7 +12123,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         template_evidence['apiScaleNormalized'] = True
         template_candidate['apiScaleNormalized'] = True
     conflict = bool(api_candidate.get('trusted') and api_num and template_num and api_num != template_num and not scale_equivalent)
-    # V505.03: a verified DeepSeek/API number is authoritative.  The template
+    # V505.04: a verified DeepSeek/API number is authoritative.  The template
     # remains useful as shadow evidence, but it never becomes the numeric source
     # when the API candidate is trusted, even when both candidates agree.
     if api_candidate.get('trusted'):
@@ -11885,7 +12184,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v505-03-automation-pipeline'
+    marker = 'v505-04-automation-pipeline'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -12251,7 +12550,7 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
     if isinstance(special_non_numeric, dict):
         return _v4013_finalize_payload_text(special_non_numeric, original_text)
 
-    # V505.03 authoritative API gate.  Verify the raw DeepSeek arithmetic before
+    # V505.04 authoritative API gate.  Verify the raw DeepSeek arithmetic before
     # any semantic template, legacy repair, or case-specific formatter can touch
     # the numeric answer.  Trusted API output is formatted and returned here;
     # reusable templates are fallback only for incomplete/untrusted API output.

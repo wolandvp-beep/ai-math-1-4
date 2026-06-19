@@ -29,8 +29,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 DEFAULT_BACKEND_BASE_URL = 'https://wolandvp-beep-ai-math-1-4-8e2f.twc1.net'
-DEFAULT_RELEASE = 'v505_03_automation_pipeline'
-DEFAULT_AUDIT_KEY = 'v505-03-live-audit'
+DEFAULT_RELEASE = 'v505_04_automation_pipeline'
+DEFAULT_AUDIT_KEY = 'v505-04-live-audit'
 DEFAULT_SECTION = 'excel_numeric_regression'
 DEFAULT_OFFSET = 200
 DEFAULT_LIMIT = 100
@@ -179,7 +179,7 @@ def gate_report(report: dict[str, Any], planned: int | None = None) -> tuple[boo
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description='Math AI 1-4 V505.03 release/audit pipeline helper')
+    parser = argparse.ArgumentParser(description='Math AI 1-4 V505.04 release/audit pipeline helper')
     parser.add_argument('--release', default=DEFAULT_RELEASE)
     parser.add_argument('--audit-key', default=DEFAULT_AUDIT_KEY)
     parser.add_argument('--section', default=DEFAULT_SECTION)
