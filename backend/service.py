@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v506_05_json_index_final_report'
-SOLVER_VERSION = 'v506-05-json-index-final-report'
+APP_RELEASE = 'v506_06_self_contained_json_report'
+SOLVER_VERSION = 'v506-06-self-contained-json-report'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -12388,7 +12388,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v506-05-json-index-final-report'
+    marker = 'v506-06-self-contained-json-report'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -13010,7 +13010,7 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
     if isinstance(special_non_numeric, dict):
         return _v4013_finalize_payload_text(special_non_numeric, original_text)
 
-    # V506.05 symbolic family gate. A valid raw DeepSeek/API expression is
+    # V506.06 symbolic family gate. A valid raw DeepSeek/API expression is
     # accepted through a reusable structural template before legacy exact maps.
     payload = _v500_attach_existing_self_verifier(payload) if isinstance(payload, dict) else payload
     symbolic_candidate = _v50601_raw_symbolic_candidate(payload, original_text)
@@ -13019,7 +13019,7 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
         if isinstance(symbolic_primary, dict):
             return symbolic_primary
 
-    # V506.05 authoritative numeric API gate. Verify arithmetic before any
+    # V506.06 authoritative numeric API gate. Verify arithmetic before any
     # semantic template or legacy repair can touch the number.
     authoritative_candidate = _v501_raw_api_answer_candidate(payload)
     if authoritative_candidate.get('trusted'):

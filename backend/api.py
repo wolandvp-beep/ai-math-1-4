@@ -195,7 +195,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('offset', '300'),
         ('limit', '100'),
         ('autoStart', '1'),
-        ('cacheBust', 'v506-05-json-index-final-report'),
+        ('cacheBust', 'v506-06-self-contained-json-report'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -221,7 +221,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V506.05 — generalized symbolic/API audit / batch 301–400 with strict anti-memorization',
+        'nextAuditPlannedMapStep': 'V506.06 — generalized symbolic/API audit / batch 301–400 with strict anti-memorization',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -256,7 +256,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditQueryOrderSafe': True,
         'nextAuditNoSectionEntityRisk': True,
         'nextAuditNoQueryParamReorderRisk': True,
-        'nextAuditNote': 'V506.05 запускает batch 301–400 через self-hosted frontend /app или GitHub Pages fallback: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
+        'nextAuditNote': 'V506.06 запускает batch 301–400 через self-hosted frontend /app или GitHub Pages fallback: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
     }
 
 
@@ -273,7 +273,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v506-05-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v506-06-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3717,7 +3717,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v506-05-json-index-final-report-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v506-06-self-contained-json-report-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -5210,7 +5210,7 @@ def _live_audit_evidence_row(row: dict[str, Any]) -> dict[str, Any]:
         'uiRenderPassed': _live_audit_ui_render_passed(row),
         'uiRenderIssues': row.get('uiRenderIssues') or [],
     }
-    # V506.05: flatten nested API/symbolic arbitration evidence into each audit
+    # V506.06: flatten nested API/symbolic arbitration evidence into each audit
     # evidence row.  Earlier reports showed zero aggregate API-primary counters
     # even though structuredSolution contained the proof.
     st = row.get('structuredSolution') if isinstance(row.get('structuredSolution'), dict) else {}
@@ -6124,7 +6124,7 @@ def _live_audit_public_run_summary(run: dict[str, Any], *, include_failures_prev
             }
             for item in evidence_rows if isinstance(item, dict) and isinstance(item.get('v501AiPipelineEvidence'), dict)
         ][:5],
-        'v501QualityNote': 'V506.05 records raw DeepSeek text, preserves self-consistent API numbers and symbolic expressions, requires zero unjustified case-specific repairs, and uses Excel only as external audit evidence.',
+        'v501QualityNote': 'V506.06 records raw DeepSeek text, preserves self-consistent API numbers and symbolic expressions, requires zero unjustified case-specific repairs, and uses Excel only as external audit evidence.',
         'uiDomProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('frontendDomRenderedOutputChecked')]),
         'uiResultBoxProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('uiResultBoxFound')]),
         'uiSolveButtonClickProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('uiSolveButtonClicked')]),
@@ -7210,9 +7210,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v506-05-json-index-final-report',
+        'visibleResultContract': 'v506-06-self-contained-json-report',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v506-05-json-index-final-report',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v506-06-self-contained-json-report',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -7869,7 +7869,8 @@ def _browser_client_summary_payload(run: dict[str, Any], request: Request | None
         'completedCaseIndexes': completed_indexes,
         'completedCaseIds': [row.get('id') for row in (run.get('evidenceResults') or []) if isinstance(row, dict)],
         'casesRemaining': max(0, int(run.get('planned') or 0) - len(completed_indexes)),
-        'finalReportUrl': base + _browser_audit_final_report_path(run_id, key) if run_id else '',
+        'finalReportUrl': base + _v50606_final_report_path_with_snapshot(run, run_id, key) if run_id else '',
+        'finalReportPath': _v50606_final_report_path_with_snapshot(run, run_id, key) if run_id else '',
     })
     return summary
 
@@ -7991,7 +7992,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v506-05-json-index-final-report'),
+        ('cacheBust', 'v506-06-self-contained-json-report'),
     ])
     return {
         **summary,
@@ -7999,8 +8000,8 @@ def _browser_client_create_or_reuse_run(
         'casesToRun': cases_to_run,
         'summaryJsonPath': status_path,
         'summaryJsonUrl': _public_base_url(request) + status_path,
-        'finalReportPath': _browser_audit_final_report_path(run_id_value, key_value),
-        'finalReportUrl': _public_base_url(request) + _browser_audit_final_report_path(run_id_value, key_value),
+        'finalReportPath': _v50606_final_report_path_with_snapshot(run, run_id_value, key_value),
+        'finalReportUrl': _public_base_url(request) + _v50606_final_report_path_with_snapshot(run, run_id_value, key_value),
         'explainUrl': _public_base_url(request) + '/api/explain',
         'frontendAuditUrl': _public_frontend_url(request) + '?' + frontend_query,
         'frontendOrigin': _public_frontend_url(request).rstrip('/'),
@@ -8563,6 +8564,59 @@ def _browser_audit_final_report_path(run_id: str, key: str | None = None) -> str
     return f'/api/diagnostics/live-audit/final-report/{APP_RELEASE}/{audit_key}/{run_id}'
 
 
+def _v50606_encode_final_report_snapshot(payload: dict[str, Any]) -> str:
+    """Encode a compact final-report snapshot into a URL-safe token.
+
+    The token makes the operator's ordinary final-report link self-contained:
+    even if the temporary server run cache is unavailable to ChatGPT fetch, the
+    pasted URL still contains the JSON needed for analysis.
+    """
+    raw = json.dumps(payload, ensure_ascii=False, separators=(',', ':'), default=str).encode('utf-8')
+    packed = zlib.compress(raw, 9)
+    return base64.urlsafe_b64encode(packed).decode('ascii').rstrip('=')
+
+
+def _v50606_decode_final_report_snapshot(token: str) -> dict[str, Any] | None:
+    token = str(token or '').strip()
+    if not token:
+        return None
+    # Keep a hard ceiling so a malicious URL cannot force unbounded decompression.
+    if len(token) > 120000:
+        return {'diagnostic': 'live-audit-final-report-snapshot-error', 'error': 'snapshot token is too large'}
+    try:
+        padded = token + ('=' * ((4 - len(token) % 4) % 4))
+        raw = zlib.decompress(base64.urlsafe_b64decode(padded.encode('ascii')))
+        data = json.loads(raw.decode('utf-8'))
+        if isinstance(data, dict):
+            data.setdefault('diagnostic', 'live-audit-final-report-snapshot')
+            data['snapshotDecodedByServer'] = True
+            return data
+    except Exception as exc:
+        return {
+            'diagnostic': 'live-audit-final-report-snapshot-error',
+            'error': type(exc).__name__,
+            'message': str(exc)[:240],
+        }
+    return {'diagnostic': 'live-audit-final-report-snapshot-error', 'error': 'decoded snapshot is not an object'}
+
+
+def _v50606_final_report_path_with_snapshot(run: dict[str, Any], run_id: str, key: str | None = None) -> str:
+    base_path = _browser_audit_final_report_path(run_id, key)
+    try:
+        payload = _v50605_compact_final_report_payload(run, str(key or LIVE_PRODUCTION_AUDIT_DEFAULT_KEY), run_id)
+        payload['selfContainedFinalReportUrl'] = True
+        payload['snapshotPurpose'] = 'V506.06: the ordinary final-report link carries this compact JSON snapshot in ?snapshot= so ChatGPT can read it even when the temporary run cache is not fetchable.'
+        token = _v50606_encode_final_report_snapshot(payload)
+        # Avoid producing impractically long URLs. If the snapshot is unexpectedly
+        # large, fall back to the normal live endpoint; the HTML page still works
+        # for a human browser while we keep the URL safe.
+        if token and len(token) <= 90000:
+            return base_path + '?' + urlencode([('snapshot', token)])
+    except Exception:
+        pass
+    return base_path
+
+
 def _browser_audit_label(payload: dict[str, Any]) -> tuple[str, str, str]:
     status = str(payload.get('status') or 'not-started')
     planned = int(payload.get('planned') or payload.get('nextAuditLimit') or 100)
@@ -8719,7 +8773,7 @@ async def live_audit_browser_client_plan(request: Request, release_token: str, k
     run = state.get('runs', {}).get(run_id_value) or run
     base_url = _public_base_url(request)
     status_query = '/api/diagnostics/live-audit/status?' + urlencode([('key', key_value), ('release', APP_RELEASE), ('runId', run_id_value)])
-    final_path = _browser_audit_final_report_path(run_id_value, key_value)
+    final_path = _v50606_final_report_path_with_snapshot(run, run_id_value, key_value)
     summary = _live_audit_public_run_summary(run, include_failures_preview=False)
     return _json_ok({
         **summary,
@@ -9039,7 +9093,7 @@ def _browser_audit_operator_html(request: Request, payload: dict[str, Any], *, k
     technical_json = json.dumps(payload, ensure_ascii=False, indent=2)
     return f'''<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="robots" content="noindex"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V506.05 generalized symbolic/API UI-render live-аудит</title>
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V506.06 generalized symbolic/API UI-render live-аудит</title>
 <style>
 body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;margin:28px auto;padding:0 16px;line-height:1.45;background:#f8fafc;color:#111827}}
 .box{{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:20px;margin:16px 0;box-shadow:0 8px 22px rgba(15,23,42,.05)}}
@@ -9047,10 +9101,10 @@ body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;ma
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px}}.metric{{background:#f3f4f6;border-radius:14px;padding:12px}}.metric b{{display:block;font-size:24px}}
 .bar{{height:18px;background:#e5e7eb;border-radius:999px;overflow:hidden}}.fill{{height:100%;width:{pct}%;background:#111827}}input{{box-sizing:border-box;width:100%;border:1px solid #d1d5db;border-radius:12px;padding:12px;font:15px ui-monospace,Menlo,monospace;background:#fff}}.muted{{color:#6b7280}}pre{{white-space:pre-wrap;background:#111827;color:#f9fafb;padding:14px;border-radius:14px;overflow:auto;max-height:360px}}
 </style></head><body>
-<h1>V506.05 — generalized symbolic/API UI-render audit</h1>
+<h1>V506.06 — generalized symbolic/API UI-render audit</h1>
 <section class="box">
   <h2>1. Открыть реальную frontend-страницу аудита</h2>
-  <p>V506.05 проверяет generalized symbolic/API pipeline на Excel batch 301–400 через реальный production frontend: откроется self-hosted frontend /app, где будет одна кнопка «Запустить / продолжить аудит».</p>
+  <p>V506.06 проверяет generalized symbolic/API pipeline на Excel batch 301–400 через реальный production frontend: откроется self-hosted frontend /app, где будет одна кнопка «Запустить / продолжить аудит».</p>
   <p><a class="primary" href="{escape(frontend_url, quote=True)}">Открыть аудит на frontend</a></p>
   <p class="muted">На frontend-странице аудит вводит задания в реальное поле <code>#taskInput</code>, нажимает реальную кнопку <code>#solveBtn</code>, ждёт <code>#resultBox</code> и сверяет DOM с API/expected.</p>
   <input readonly value="{escape(frontend_url, quote=True)}" onclick="this.select()">
@@ -9341,7 +9395,7 @@ def _v50605_compact_final_report_payload(run: dict[str, Any], key_value: str, ru
         'dashboardMode': 'html-page-with-labeled-links-and-json-pre',
         'fullProofEmbedded': False,
         'fullProofLinkedOnly': True,
-        'reason': 'V506.05 restores the old final-report dashboard: labeled links first, compact JSON below, no giant embedded resultText/evidence payload.',
+        'reason': 'V506.06 restores the old final-report dashboard: labeled links first, compact JSON below, no giant embedded resultText/evidence payload.',
         'runId': run.get('runId'),
         'status': run.get('status'),
         'section': run.get('section'),
@@ -9442,8 +9496,14 @@ def _v50605_compact_final_report_payload(run: dict[str, Any], key_value: str, ru
 
 
 @app.get('/api/diagnostics/live-audit/final-report-json/{release_token}/{key_value}/{run_id_value}')
-async def live_audit_browser_final_report_json(release_token: str, key_value: str, run_id_value: str):
+async def live_audit_browser_final_report_json(release_token: str, key_value: str, run_id_value: str, snapshot: str = ''):
     """Direct compact JSON endpoint for tooling. The operator still sends /final-report/."""
+    snapshot_payload = _v50606_decode_final_report_snapshot(snapshot)
+    if snapshot_payload is not None:
+        snapshot_payload.setdefault('release', release_token)
+        snapshot_payload.setdefault('auditKey', key_value)
+        snapshot_payload.setdefault('runId', run_id_value)
+        return _json_ok(snapshot_payload)
     run = _live_audit_load_run_for_read(key_value, run_id_value, release_token, 'live-audit-final-report-json')
     if isinstance(run, JSONResponse):
         return run
@@ -9451,17 +9511,25 @@ async def live_audit_browser_final_report_json(release_token: str, key_value: st
 
 
 @app.get('/api/diagnostics/live-audit/final-report/{release_token}/{key_value}/{run_id_value}')
-async def live_audit_browser_final_report(release_token: str, key_value: str, run_id_value: str):
+async def live_audit_browser_final_report(release_token: str, key_value: str, run_id_value: str, snapshot: str = ''):
     """HTML dashboard final report with visible labeled links and compact JSON."""
-    run = _live_audit_load_run_for_read(key_value, run_id_value, release_token, 'live-audit-final-report-html-json-index')
-    if isinstance(run, JSONResponse):
-        return run
-    payload = _v50605_compact_final_report_payload(run, key_value, run_id_value)
+    snapshot_payload = _v50606_decode_final_report_snapshot(snapshot)
+    if snapshot_payload is not None:
+        payload = snapshot_payload
+        payload.setdefault('release', release_token)
+        payload.setdefault('auditKey', key_value)
+        payload.setdefault('runId', run_id_value)
+    else:
+        run = _live_audit_load_run_for_read(key_value, run_id_value, release_token, 'live-audit-final-report-html-json-index')
+        if isinstance(run, JSONResponse):
+            return run
+        payload = _v50605_compact_final_report_payload(run, key_value, run_id_value)
+    endpoints = payload.get('fullProofEndpoints') if isinstance(payload.get('fullProofEndpoints'), dict) else {}
     extra_links = [
-        ('Open compact JSON final report', payload['fullProofEndpoints']['jsonFinalReport']),
-        ('Open full failures proof', payload['failuresPath']),
-        ('Open full evidence proof', payload['evidencePath']),
-        ('Open acceptance proof', payload['acceptancePath']),
+        ('Open compact JSON final report', endpoints.get('jsonFinalReport') or payload.get('jsonFinalReport') or ''),
+        ('Open full failures proof', payload.get('failuresPath') or endpoints.get('failuresRun') or ''),
+        ('Open full evidence proof', payload.get('evidencePath') or endpoints.get('evidenceRun') or ''),
+        ('Open acceptance proof', payload.get('acceptancePath') or endpoints.get('acceptanceRun') or ''),
     ]
     return _html_ok(_audit_dashboard_html('Live audit final report — JSON index', payload, extra_links=extra_links))
 
@@ -9609,7 +9677,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v506-05-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v506-06-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -9956,7 +10024,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v506-05-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v506-06-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:
