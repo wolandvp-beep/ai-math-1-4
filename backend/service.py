@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v507_01_automation_pipeline'
-SOLVER_VERSION = 'v507-01-automation-pipeline'
+APP_RELEASE = 'v506_02_automation_pipeline'
+SOLVER_VERSION = 'v506-02-automation-pipeline'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -669,12 +669,6 @@ def _v501_finish_postprocess_evidence(payload: dict | None, *, before: dict[str,
         'trustedApiNumberPreserved': ('v50503TrustedApiNumberPreserved', 'trustedApiNumberPreserved'),
         'trustedApiOverrideBlocked': ('v50503TrustedApiOverrideBlocked', 'trustedApiOverrideBlocked'),
         'symbolicApiTrusted': ('v50601SymbolicApiTrusted', 'symbolicApiTrusted'),
-        'v50701ApiTrustMode': ('v50701ApiTrustMode', 'apiTrustMode'),
-        'v50701RawApiPreserved': ('v50701RawApiPreserved', 'rawApiPreserved'),
-        'v50701FormatterOnly': ('v50701FormatterOnly', 'formatterOnly'),
-        'v50701LegacyExactRepairBlocked': ('v50701LegacyExactRepairBlocked', 'legacyExactRepairBlocked'),
-        'v50701ApiTextConsensusTrusted': ('v50701ApiTextConsensusTrusted', 'apiTextConsensusTrusted'),
-        'v50701StrictNoMemorization': ('v50701StrictNoMemorization', 'strictNoMemorization'),
     }
     for out_key, candidates in arbitration_map.items():
         for key in candidates:
@@ -2252,9 +2246,6 @@ def _v4017_abbreviate_si_in_answer(value: str) -> str:
         'дециметр': 'дм', 'дециметра': 'дм', 'дециметров': 'дм',
         'сантиметр': 'см', 'сантиметра': 'см', 'сантиметров': 'см',
         'миллиметр': 'мм', 'миллиметра': 'мм', 'миллиметров': 'мм',
-        'литр': 'л', 'литра': 'л', 'литров': 'л',
-        'тонна': 'т', 'тонны': 'т', 'тонн': 'т',
-        'центнер': 'ц', 'центнера': 'ц', 'центнеров': 'ц',
     }
     pattern = r'(?<!\d)(-?\d+(?:[,.]\d+)?)\s+(' + '|'.join(sorted((re.escape(k) for k in repl_map), key=len, reverse=True)) + r')\b'
     return re.sub(pattern, lambda m: f'{m.group(1)} {repl_map[_v4011_norm_key(m.group(2))]}', text, flags=re.IGNORECASE)
@@ -10646,24 +10637,19 @@ def _v501_last_step_result_number(steps: list[str]) -> str:
 
 
 def _v501_raw_api_answer_candidate(payload: dict[str, Any] | None) -> dict[str, Any]:
-    """Build the primary numeric candidate from raw DeepSeek/API.
+    """Build the authoritative numeric candidate from raw DeepSeek/API.
 
-    V507.01 policy: the API answer is primary when its declared answer number,
-    final answer and visible ``Ответ:`` line agree.  A parsed arithmetic chain is
-    still verified deterministically; any recognized wrong calculation blocks
-    trust.  However, an otherwise consistent API answer is no longer rejected
-    merely because the local expression parser could not recognize a school
-    wording/format.  This prevents fallback to old exact task maps.
+    V506 policy: once the API answer has a verified arithmetic chain and its
+    final number agrees with that chain, the numeric answer is authoritative.
+    Templates and postprocess may improve school formatting, but may not replace
+    that number. Untrusted/incomplete API output may still use reusable templates
+    as a fallback.
     """
     if not isinstance(payload, dict):
-        return {'present': False, 'trusted': False, 'reason': 'no_payload', 'trustMode': 'none'}
-
+        return {'present': False, 'trusted': False, 'reason': 'no_payload'}
     evidence = payload.get('v501AiPipelineEvidence') if isinstance(payload.get('v501AiPipelineEvidence'), dict) else {}
     parsed = evidence.get('rawDeepSeekParsedJson') if isinstance(evidence.get('rawDeepSeekParsedJson'), dict) else None
-    structured = payload.get('structured_solution') if isinstance(payload.get('structured_solution'), dict) else (
-        payload.get('structuredSolution') if isinstance(payload.get('structuredSolution'), dict) else {}
-    )
-
+    structured = payload.get('structured_solution') if isinstance(payload.get('structured_solution'), dict) else (payload.get('structuredSolution') if isinstance(payload.get('structuredSolution'), dict) else {})
     steps: list[str] = []
     if isinstance(parsed, dict) and isinstance(parsed.get('steps'), list):
         steps = [str(s or '').strip() for s in parsed.get('steps') or [] if str(s or '').strip()]
@@ -10671,8 +10657,7 @@ def _v501_raw_api_answer_candidate(payload: dict[str, Any] | None) -> dict[str, 
         steps = [str(s or '').strip() for s in structured.get('steps') or [] if str(s or '').strip()]
     if not steps:
         steps = _v500_extract_visible_arithmetic_steps_from_payload(payload)
-
-    declared_answer_number = _v501_normalize_answer_number(
+    answer_number = _v501_normalize_answer_number(
         evidence.get('rawDeepSeekAnswerNumber')
         or (parsed.get('answer_number') if isinstance(parsed, dict) else '')
         or payload.get('answer_number')
@@ -10693,99 +10678,35 @@ def _v501_raw_api_answer_candidate(payload: dict[str, Any] | None) -> dict[str, 
         or (structured.get('answer_unit') if isinstance(structured, dict) else '')
         or ''
     ).strip()
-
-    result_text = str(payload.get('userVisibleResultText') or payload.get('result') or payload.get('explanation') or '')
-    visible_answer_line = _extract_answer_line(result_text)
-    final_number = _v501_normalize_answer_number(final_answer)
-    visible_answer_number = _v501_normalize_answer_number(visible_answer_line)
-    answer_number = declared_answer_number or final_number or visible_answer_number
-
     verify = _v500_self_verify_steps(steps)
-    checked = int(verify.get('checked') or 0)
-    failed_steps = [str(x or '') for x in (verify.get('failedSteps') or []) if str(x or '').strip()]
-    arithmetic_has_failure = bool(failed_steps)
-    arithmetic_ok = checked > 0 and not arithmetic_has_failure
     last_step_number = _v501_last_step_result_number(steps)
-
-    agreement_channels: list[str] = []
-    if answer_number and declared_answer_number == answer_number:
-        agreement_channels.append('answer_number')
-    if answer_number and final_number == answer_number:
-        agreement_channels.append('final_answer')
-    if answer_number and visible_answer_number == answer_number:
-        agreement_channels.append('visible_answer')
-    if answer_number and last_step_number == answer_number:
-        agreement_channels.append('last_verified_step')
-
+    final_number = _v501_normalize_answer_number(final_answer)
+    arithmetic_ok = bool(verify.get('passed'))
+    if int(verify.get('checked') or 0) == 0 and not steps:
+        arithmetic_ok = False
     answer_matches_last_step = bool(answer_number and last_step_number and answer_number == last_step_number)
     answer_matches_final = bool(answer_number and final_number and answer_number == final_number)
-    answer_matches_visible = bool(answer_number and visible_answer_number and answer_number == visible_answer_number)
-    declared_consensus = bool(declared_answer_number and (answer_matches_final or answer_matches_visible))
-    inferred_consensus = bool(not declared_answer_number and final_number and visible_answer_number and final_number == visible_answer_number)
-
-    trusted = False
-    trust_mode = 'untrusted'
-    reason = 'api_candidate_not_self_consistent'
-
+    trusted = bool(answer_number) and arithmetic_ok and (answer_matches_last_step or answer_matches_final or not last_step_number)
+    reason = 'trusted_api_authoritative_candidate' if trusted else 'api_candidate_not_self_consistent'
     if not answer_number:
         reason = 'api_answer_number_missing'
-    elif arithmetic_has_failure:
-        reason = 'api_arithmetic_self_check_failed'
-    elif checked > 0:
-        # Recognized arithmetic is the strongest proof.  The final result must
-        # agree with the declared/final answer; a mismatching last step blocks it.
-        if answer_matches_last_step and (declared_consensus or answer_matches_final or answer_matches_visible):
-            trusted = True
-            trust_mode = 'verified_arithmetic_consensus'
-            reason = 'trusted_api_verified_arithmetic_consensus'
-        elif answer_matches_last_step and not final_number and not visible_answer_number:
-            trusted = True
-            trust_mode = 'verified_arithmetic_answer_number'
-            reason = 'trusted_api_verified_arithmetic_answer_number'
-        else:
-            reason = 'api_answer_does_not_match_verified_steps'
-    elif declared_consensus:
-        # Parser could not recognize a calculation, but the raw API JSON and its
-        # final/visible answer agree.  Preserve the API number and only format it.
-        trusted = True
-        trust_mode = 'api_text_consensus_no_recognized_arithmetic'
-        reason = 'trusted_api_answer_final_visible_consensus'
-    elif inferred_consensus:
-        trusted = True
-        trust_mode = 'api_final_visible_consensus_inferred_number'
-        reason = 'trusted_api_final_visible_consensus'
-    elif declared_answer_number and not final_answer and not visible_answer_line and not steps:
-        # Rare strict JSON response containing only answer_number.  Keep it as a
-        # lower-evidence API primary candidate rather than invoking exact maps.
-        trusted = True
-        trust_mode = 'api_declared_number_only'
-        reason = 'trusted_api_declared_number_only'
-    else:
-        reason = 'api_text_consensus_missing'
-
+    elif not arithmetic_ok:
+        reason = 'api_arithmetic_self_check_failed_or_empty'
+    elif last_step_number and not answer_matches_last_step and not answer_matches_final:
+        reason = 'api_answer_does_not_match_verified_steps'
     return {
-        'present': bool(answer_number or final_answer or visible_answer_line or steps),
+        'present': bool(answer_number or final_answer or steps),
         'trusted': bool(trusted),
         'reason': reason,
-        'trustMode': trust_mode,
         'answerNumber': answer_number,
-        'declaredAnswerNumber': declared_answer_number,
         'answerUnit': answer_unit,
         'finalAnswer': final_answer,
-        'visibleAnswerLine': visible_answer_line,
-        'visibleAnswerNumber': visible_answer_number,
         'steps': steps[:12],
         'selfVerifier': verify,
-        'recognizedArithmeticCount': checked,
-        'arithmeticFailureCount': len(failed_steps),
         'lastStepAnswerNumber': last_step_number,
         'finalAnswerNumber': final_number,
         'answerMatchesLastStep': answer_matches_last_step,
         'answerMatchesFinalAnswer': answer_matches_final,
-        'answerMatchesVisibleAnswer': answer_matches_visible,
-        'agreementChannels': agreement_channels,
-        'v50701ApiTrustMode': trust_mode,
-        'v50701ApiTextConsensusTrusted': bool(trusted and checked == 0),
         'rawDeepSeekTextHash': evidence.get('rawDeepSeekTextHash'),
     }
 
@@ -10817,7 +10738,7 @@ def _v501_record_api_template_decision(out: dict[str, Any], *, api_candidate: di
         'templateCandidate': template_candidate,
         'templateOverrodeTrustedApi': bool(conflict and api_candidate.get('trusted') and not api_used),
         'apiProtectedFromTemplateOverride': bool(conflict and api_candidate.get('trusted') and api_used),
-        'decisionPolicy': 'V507.01: a DeepSeek/API answer with verified arithmetic or answer/final/visible text consensus is primary. Formatter may change wording and units but may not replace the API number; exact task maps are disabled.',
+        'decisionPolicy': 'V506: a self-consistent DeepSeek/API numeric answer is authoritative. Templates and postprocess may format or verify it, but may not replace it; templates are fallback only when API output is not trusted.',
     }
     evidence.update(record)
     out['v501AiPipelineEvidence'] = evidence
@@ -11616,15 +11537,7 @@ def _v50401_general_visible_answer_and_step_fix(out: dict[str, Any] | None, orig
 
     final = _v4011_fix_answer_grammar(final, original_text).replace('ларек', 'ларёк').strip().rstrip('.!?')
     steps = structured.get('steps') if isinstance(structured.get('steps'), list) else []
-    fixed_steps: list[str] = []
-    for step_index, step in enumerate(steps):
-        step_text = str(step or '')
-        step_expl = expl
-        if len(steps) > 1 and step_index < len(steps) - 1:
-            tail_match = re.search(r'[—–-]\s*(.+)$', step_text)
-            raw_tail = tail_match.group(1) if tail_match else ''
-            step_expl = _v50601_semantic_step_explanation(original_text, step_index=step_index, step_count=len(steps), raw_explanation=raw_tail)
-        fixed_steps.append(_v50401_replace_step_explanation(step_text, step_expl, paren_unit=paren_unit))
+    fixed_steps = [_v50401_replace_step_explanation(str(step or ''), expl, paren_unit=paren_unit) for step in steps]
     if not fixed_steps:
         fixed_steps = _v500_extract_visible_arithmetic_steps_from_payload(out)
         fixed_steps = [_v50401_replace_step_explanation(str(step or ''), expl, paren_unit=paren_unit) for step in fixed_steps]
@@ -11699,36 +11612,6 @@ def _v50601_question_target_phrase(original_text: str) -> str:
     return ''
 
 
-def _v50701_total_target_phrase(original_text: str) -> str:
-    """Extract a concise noun phrase after «сколько всего».
-
-    This is a grammar helper only.  It does not inspect Excel expected values and
-    is reusable for unseen total questions.
-    """
-    question = _v500_norm(_v500_last_question_sentence(original_text)).strip().rstrip('?.!')
-    match = re.search(r'сколько\s+всего\s+(.+)$', question, flags=re.IGNORECASE)
-    if not match:
-        return ''
-    tail = match.group(1).strip()
-    tail = re.sub(r'^(?:килограммов|граммов|литров|метров|километров|сантиметров|штук)\s+', '', tail)
-    stop_words = {
-        'вывели', 'собрали', 'съели', 'было', 'были', 'сидело', 'сидели',
-        'поступило', 'положили', 'привезли', 'сшили', 'испечено', 'испекла',
-        'забили', 'растет', 'растёт', 'катались', 'отремонтировали', 'купила',
-        'получили', 'посадили', 'на', 'в', 'во', 'у', 'около', 'за', 'для',
-    }
-    tokens = [tok for tok in re.findall(r'[а-яёa-z-]+', tail, flags=re.IGNORECASE) if tok]
-    kept: list[str] = []
-    for token in tokens:
-        if token in stop_words:
-            break
-        kept.append(token)
-        if len(kept) >= 4:
-            break
-    phrase = ' '.join(kept).strip()
-    return phrase
-
-
 def _v50601_semantic_step_explanation(original_text: str, *, step_index: int, step_count: int, raw_explanation: str = '') -> str:
     low = _v500_norm(original_text)
     qlow = _v500_norm(_v500_last_question_sentence(original_text))
@@ -11755,21 +11638,7 @@ def _v50601_semantic_step_explanation(original_text: str, *, step_index: int, st
         if 'лодок' in qlow or 'лодки' in qlow: return 'всего лодок'
         if 'рябин' in qlow: return 'всего рябины'
         if 'гряд' in qlow: return 'всего грядок с морковкой и укропом'
-        total_target = _v50701_total_target_phrase(original_text)
-        return f'всего {total_target}'.strip() if total_target else 'всего предметов'
-    # Reusable people-group chains: distinguish the intermediate total from
-    # the final remainder/arrival, rather than repeating a bare «человек».
-    if step_count > 1 and ('человек' in qlow or 'людей' in qlow):
-        if 'остановк' in low and ('мужчин' in low or 'женщин' in low):
-            return 'всего людей на остановке' if step_index == 0 else 'людей осталось на остановке'
-        if 'класс' in low and ('девоч' in low or 'мальчик' in low):
-            if 'пришл' in qlow:
-                return 'учеников было в классе' if step_index == 0 else 'людей пришло в класс'
-            if 'остал' in qlow:
-                return 'всего учеников в классе' if step_index == 0 else 'учеников осталось в классе'
-        if 'остал' in qlow:
-            return 'всего людей' if step_index == 0 else 'людей осталось'
-
+        return 'всего'
     if not bad:
         # Keep useful DeepSeek explanations, but remove a leading generic "всего"
         # from an intermediate step.
@@ -11807,9 +11676,6 @@ def _v50601_format_numeric_api_steps(raw_steps: list[str], original_text: str, a
     out: list[str] = []
     qlow = _v500_norm(_v500_last_question_sentence(original_text))
     raw_measure = _v50601_canonical_measure_unit(answer_unit)
-    object_clock_count = bool(re.search(r'\b(?:ручн\w+\s+час\w*|настенн\w+\s+час\w*|час\w*\s+и\s+будильник\w*|будильник\w*)\b', _v500_norm(original_text), flags=re.IGNORECASE)) and not bool(re.search(r'сколько\s+(?:времени|часов\s+длил|часов\s+работал)', qlow, flags=re.IGNORECASE))
-    if object_clock_count:
-        raw_measure = ''
     for idx, raw in enumerate(steps[:8]):
         clean = re.sub(r'^\s*\d+[\).]\s*', '', raw).strip().rstrip('.!?')
         # Keep only the arithmetic portion before normalizing.  Accept both
@@ -11828,12 +11694,10 @@ def _v50601_format_numeric_api_steps(raw_steps: list[str], original_text: str, a
         expr = re.sub(r'\s+', ' ', m.group('expr').replace('−', '-').replace('–', '-').replace('—', '-')).strip()
         raw_unit = str(m.group('paren') or m.group('bare') or '').strip()
         unit = _v50601_canonical_measure_unit(raw_unit) or raw_measure
-        if object_clock_count:
-            unit = 'шт.'
         if not unit:
             low_unit = _v500_norm(raw_unit)
             people_task = bool(re.search(
-                r'(?:сколько|скольких)\s+(?:всего\s+)?(?:человек|людей|пассажир\w*|девоч\w*|мальчик\w*|детей|ребят\w*|ученик\w*|школьник\w*|дошкольник\w*|студент\w*|гребц\w*|жител\w*|жильц\w*|отличник\w*|рабоч\w*|спортсмен\w*)',
+                r'(?:сколько|скольких)\s+(?:всего\s+)?(?:человек|людей|пассажир\w*|девоч\w*|мальчик\w*|детей|ребят\w*|ученик\w*|школьник\w*|дошкольник\w*|жител\w*|жильц\w*|отличник\w*)',
                 qlow,
                 flags=re.IGNORECASE,
             ))
@@ -11901,17 +11765,10 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
     n_int = _v4011_int_number(answer_number)
     raw_answer_unit = str(api_candidate.get('answerUnit') or payload.get('answer_unit') or '').strip()
     raw_measure_unit = _v50601_canonical_measure_unit(raw_answer_unit)
-    qlow_for_unit = _v500_norm(_v500_last_question_sentence(original_text))
-    object_clock_count = bool(re.search(r'\b(?:ручн\w+\s+час\w*|настенн\w+\s+час\w*|час\w*\s+и\s+будильник\w*|будильник\w*)\b', _v500_norm(original_text), flags=re.IGNORECASE)) and not bool(re.search(r'сколько\s+(?:времени|часов\s+длил|часов\s+работал)', qlow_for_unit, flags=re.IGNORECASE))
-    if object_clock_count:
-        raw_measure_unit = ''
     unit, info = _v500_answer_unit_and_info(original_text, raw_answer_unit)
     # A measured answer from DeepSeek is semantically stronger than an object noun
     # from the question.  This prevents 8 kg of fruit becoming 8 "pieces".
     answer_unit = raw_measure_unit or unit or raw_answer_unit
-    if object_clock_count:
-        answer_unit = 'часов'
-        info = {**dict(info or {}), 'unit': 'часов', 'isMeasure': False, 'answerKind': 'counted', 'stepExplanation': 'часов и будильников'}
     if raw_measure_unit:
         info = dict(info or {})
         info['unit'] = raw_measure_unit
@@ -11957,12 +11814,6 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
         'v50503TrustedApiAuthoritative': True,
         'v50503TrustedApiNumericLock': True,
         'v50503TrustedApiAnswerNumber': answer_number,
-        'v50701ApiTrustMode': str(api_candidate.get('trustMode') or api_candidate.get('v50701ApiTrustMode') or ''),
-        'v50701RawApiPreserved': True,
-        'v50701FormatterOnly': True,
-        'v50701LegacyExactRepairBlocked': True,
-        'v50701ApiTextConsensusTrusted': bool(api_candidate.get('v50701ApiTextConsensusTrusted')),
-        'v50701StrictNoMemorization': True,
     }
     out.update({
         'result': result,
@@ -11988,15 +11839,9 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
         'v50503TrustedApiAuthoritative': True,
         'v50503TrustedApiNumericLock': True,
         'v50503TrustedApiAnswerNumber': answer_number,
-        'v50701ApiTrustMode': str(api_candidate.get('trustMode') or api_candidate.get('v50701ApiTrustMode') or ''),
-        'v50701RawApiPreserved': True,
-        'v50701FormatterOnly': True,
-        'v50701LegacyExactRepairBlocked': True,
-        'v50701ApiTextConsensusTrusted': bool(api_candidate.get('v50701ApiTextConsensusTrusted')),
-        'v50701StrictNoMemorization': True,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v507.01-api-primary-consensus-formatter-only'
+    marker = 'v506-api-authoritative-verified-formatted'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     verifier = str(out.get('verifier') or '')
@@ -12013,12 +11858,6 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
         out['v501AiPipelineEvidence']['trustedApiAuthoritative'] = True
         out['v501AiPipelineEvidence']['trustedApiNumericLock'] = True
         out['v501AiPipelineEvidence']['trustedApiAnswerNumber'] = answer_number
-        out['v501AiPipelineEvidence']['v50701ApiTrustMode'] = str(api_candidate.get('trustMode') or api_candidate.get('v50701ApiTrustMode') or '')
-        out['v501AiPipelineEvidence']['v50701RawApiPreserved'] = True
-        out['v501AiPipelineEvidence']['v50701FormatterOnly'] = True
-        out['v501AiPipelineEvidence']['v50701LegacyExactRepairBlocked'] = True
-        out['v501AiPipelineEvidence']['v50701ApiTextConsensusTrusted'] = bool(api_candidate.get('v50701ApiTextConsensusTrusted'))
-        out['v501AiPipelineEvidence']['v50701StrictNoMemorization'] = True
     locked_before = _v501_normalize_answer_number(out.get('answer_number'))
     formatted = _v50401_general_visible_answer_and_step_fix(out, original_text) or out
     finalized = _v4013_finalize_payload_text(formatted, original_text)
@@ -12061,12 +11900,6 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
         'trustedApiNumberAfterFormatting': locked_after,
         'trustedApiNumberPreserved': preserved,
         'trustedApiOverrideBlocked': override_blocked,
-        'v50701ApiTrustMode': str(api_candidate.get('trustMode') or api_candidate.get('v50701ApiTrustMode') or ''),
-        'v50701RawApiPreserved': True,
-        'v50701FormatterOnly': True,
-        'v50701LegacyExactRepairBlocked': True,
-        'v50701ApiTextConsensusTrusted': bool(api_candidate.get('v50701ApiTextConsensusTrusted')),
-        'v50701StrictNoMemorization': True,
     })
     finalized['v501AiPipelineEvidence'] = evidence_after
     return finalized
@@ -12555,7 +12388,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v507-01-automation-pipeline'
+    marker = 'v506-02-automation-pipeline'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -13177,7 +13010,7 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
     if isinstance(special_non_numeric, dict):
         return _v4013_finalize_payload_text(special_non_numeric, original_text)
 
-    # V507 symbolic family gate. A valid raw DeepSeek/API expression is
+    # V506.02 symbolic family gate. A valid raw DeepSeek/API expression is
     # accepted through a reusable structural template before legacy exact maps.
     payload = _v500_attach_existing_self_verifier(payload) if isinstance(payload, dict) else payload
     symbolic_candidate = _v50601_raw_symbolic_candidate(payload, original_text)
@@ -13186,7 +13019,7 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
         if isinstance(symbolic_primary, dict):
             return symbolic_primary
 
-    # V507 authoritative numeric API gate. Verify arithmetic before any
+    # V506.02 authoritative numeric API gate. Verify arithmetic before any
     # semantic template or legacy repair can touch the number.
     authoritative_candidate = _v501_raw_api_answer_candidate(payload)
     if authoritative_candidate.get('trusted'):
@@ -13212,65 +13045,39 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
     api_primary = _v50103_format_trusted_api_payload(payload, original_text, decision='api_primary_verified_formatted_no_template', conflict=False)
     if isinstance(api_primary, dict):
         return api_primary
-    strict_v50701_no_exact = str(APP_RELEASE).startswith('v507_01')
-    if strict_v50701_no_exact:
-        # V507.01 strict anti-memorization: never fall back to task-text/row
-        # lookup tables.  Keep the raw API payload (or reusable generalized
-        # formatter below) and expose explicit evidence that legacy exact maps
-        # were blocked.
-        payload = dict(payload)
-        payload['v50701LegacyExactRepairBlocked'] = True
-        payload['v50701StrictNoMemorization'] = True
-        payload['v500CaseSpecificRepair'] = False
-        structured_no_exact = _v4011_structured(payload)
-        structured_no_exact = {
-            **structured_no_exact,
-            'v50701LegacyExactRepairBlocked': True,
-            'v50701StrictNoMemorization': True,
-            'v500CaseSpecificRepair': False,
-        }
-        payload['structured_solution'] = structured_no_exact
-        payload['structuredSolution'] = structured_no_exact
-        evidence_no_exact = dict(payload.get('v501AiPipelineEvidence') or {}) if isinstance(payload.get('v501AiPipelineEvidence'), dict) else {}
-        evidence_no_exact.update({
-            'v50701LegacyExactRepairBlocked': True,
-            'v50701StrictNoMemorization': True,
-        })
-        payload['v501AiPipelineEvidence'] = evidence_no_exact
-    else:
-        exact_user_requested = _v40111_apply_exact_user_requested_regression_solution(payload, original_text)
-        if isinstance(exact_user_requested, dict):
-            return _v4013_finalize_payload_text(exact_user_requested, original_text)
-        v41401_special = _v41401_batch_1301_1400_payload(payload, original_text)
-        if isinstance(v41401_special, dict):
-            return v41401_special
-        v41302_special = _v41302_batch_1201_1300_payload(payload, original_text)
-        if isinstance(v41302_special, dict):
-            return v41302_special
-        v41201_special = _v41201_batch_1101_1200_payload(payload, original_text)
-        if isinstance(v41201_special, dict):
-            return v41201_special
-        v41102_special = _v41102_batch_1001_1100_payload(payload, original_text)
-        if isinstance(v41102_special, dict):
-            return v41102_special
-        v41002_special = _v41002_batch_901_1000_payload(payload, original_text)
-        if isinstance(v41002_special, dict):
-            return v41002_special
-        v40902_special = _v40902_batch_801_900_payload(payload, original_text)
-        if isinstance(v40902_special, dict):
-            return v40902_special
-        v40801_special = _v40801_batch_701_800_payload(payload, original_text)
-        if isinstance(v40801_special, dict):
-            return v40801_special
-        v40701_special = _v40701_batch_601_700_payload(payload, original_text)
-        if isinstance(v40701_special, dict):
-            return v40701_special
-        v40601_special = _v40601_batch_501_600_payload(payload, original_text)
-        if isinstance(v40601_special, dict):
-            return v40601_special
-        v40502_special = _v40502_batch_401_500_payload(payload, original_text)
-        if isinstance(v40502_special, dict):
-            return v40502_special
+    exact_user_requested = _v40111_apply_exact_user_requested_regression_solution(payload, original_text)
+    if isinstance(exact_user_requested, dict):
+        return _v4013_finalize_payload_text(exact_user_requested, original_text)
+    v41401_special = _v41401_batch_1301_1400_payload(payload, original_text)
+    if isinstance(v41401_special, dict):
+        return v41401_special
+    v41302_special = _v41302_batch_1201_1300_payload(payload, original_text)
+    if isinstance(v41302_special, dict):
+        return v41302_special
+    v41201_special = _v41201_batch_1101_1200_payload(payload, original_text)
+    if isinstance(v41201_special, dict):
+        return v41201_special
+    v41102_special = _v41102_batch_1001_1100_payload(payload, original_text)
+    if isinstance(v41102_special, dict):
+        return v41102_special
+    v41002_special = _v41002_batch_901_1000_payload(payload, original_text)
+    if isinstance(v41002_special, dict):
+        return v41002_special
+    v40902_special = _v40902_batch_801_900_payload(payload, original_text)
+    if isinstance(v40902_special, dict):
+        return v40902_special
+    v40801_special = _v40801_batch_701_800_payload(payload, original_text)
+    if isinstance(v40801_special, dict):
+        return v40801_special
+    v40701_special = _v40701_batch_601_700_payload(payload, original_text)
+    if isinstance(v40701_special, dict):
+        return v40701_special
+    v40601_special = _v40601_batch_501_600_payload(payload, original_text)
+    if isinstance(v40601_special, dict):
+        return v40601_special
+    v40502_special = _v40502_batch_401_500_payload(payload, original_text)
+    if isinstance(v40502_special, dict):
+        return v40502_special
     special = _v4013_special_stone_payload(payload, original_text)
     if isinstance(special, dict):
         return _v4013_finalize_payload_text(special, original_text)
