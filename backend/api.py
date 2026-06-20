@@ -192,10 +192,10 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('release', APP_RELEASE),
         ('auditKey', audit_key),
         ('section', 'excel_numeric_regression'),
-        ('offset', '400'),
+        ('offset', '500'),
         ('limit', '100'),
         ('autoStart', '1'),
-        ('cacheBust', 'v507-06-short-r-report-parking'),
+        ('cacheBust', 'v508-01-excel-501-600-short-r'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -213,7 +213,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         ('section', 'excel_numeric_regression'),
         ('key', audit_key),
         ('limit', '100'),
-        ('offset', '400'),
+        ('offset', '500'),
         ('allowExternal', '1'),
         ('maxExternalCalls', '150'),
         ('release', APP_RELEASE),
@@ -221,7 +221,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V507.06 — generalized symbolic/API audit / batch 401–500 with strict anti-memorization',
+        'nextAuditPlannedMapStep': 'V508.01 — generalized symbolic/API audit / batch 501–600 with strict anti-memorization',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -256,7 +256,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditQueryOrderSafe': True,
         'nextAuditNoSectionEntityRisk': True,
         'nextAuditNoQueryParamReorderRisk': True,
-        'nextAuditNote': 'V507.06 запускает batch 401–500 через self-hosted frontend /app или GitHub Pages fallback: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
+        'nextAuditNote': 'V508.01 запускает batch 501–600 через self-hosted frontend /app или GitHub Pages fallback: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
     }
 
 
@@ -273,7 +273,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v507-06-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v508-01-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3717,7 +3717,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v507-06-short-r-report-parking-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v508-01-excel-501-600-short-r-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -5210,7 +5210,7 @@ def _live_audit_evidence_row(row: dict[str, Any]) -> dict[str, Any]:
         'uiRenderPassed': _live_audit_ui_render_passed(row),
         'uiRenderIssues': row.get('uiRenderIssues') or [],
     }
-    # V507.06: flatten nested API/symbolic arbitration evidence into each audit
+    # V508.01: flatten nested API/symbolic arbitration evidence into each audit
     # evidence row.  Earlier reports showed zero aggregate API-primary counters
     # even though structuredSolution contained the proof.
     st = row.get('structuredSolution') if isinstance(row.get('structuredSolution'), dict) else {}
@@ -6124,7 +6124,7 @@ def _live_audit_public_run_summary(run: dict[str, Any], *, include_failures_prev
             }
             for item in evidence_rows if isinstance(item, dict) and isinstance(item.get('v501AiPipelineEvidence'), dict)
         ][:5],
-        'v501QualityNote': 'V507.06 records raw DeepSeek text, preserves self-consistent API numbers and symbolic expressions, requires zero unjustified case-specific repairs, and uses Excel only as external audit evidence.',
+        'v501QualityNote': 'V508.01 records raw DeepSeek text, preserves self-consistent API numbers and symbolic expressions, requires zero unjustified case-specific repairs, and uses Excel only as external audit evidence.',
         'uiDomProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('frontendDomRenderedOutputChecked')]),
         'uiResultBoxProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('uiResultBoxFound')]),
         'uiSolveButtonClickProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('uiSolveButtonClicked')]),
@@ -7210,9 +7210,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v507-06-short-r-report-parking',
+        'visibleResultContract': 'v508-01-excel-501-600-short-r',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v507-06-short-r-report-parking',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v508-01-excel-501-600-short-r',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -7643,7 +7643,7 @@ def _api_v50703_final_from_question(original_text: str, answer_number: int, curr
 
 
 def _api_v50703_excel_401_500_general_payload(original_text: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
-    """V507.06 route-layer semantic UI repair for the 401–500 Excel family.
+    """V508.01 route-layer semantic UI repair for the 501–600 Excel batch.
 
     The repair is based on question grammar and the verified API arithmetic.  It
     fixes final-answer phrasing, dash explanations and unit tokens in the visible
@@ -8566,7 +8566,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v507-06-short-r-report-parking'),
+        ('cacheBust', 'v508-01-excel-501-600-short-r'),
     ])
     return {
         **summary,
@@ -9259,7 +9259,7 @@ def _v50702_micro_final_report_payload(payload: dict[str, Any]) -> dict[str, Any
                 groups.append(item)
         micro['failureIssueGroups'] = groups
     micro['chatgptPlainJsonFragment'] = True
-    micro['fragmentPurpose'] = 'V507.06: decode the #json= fragment with URL decoding; it is plain compact JSON, not zlib.'
+    micro['fragmentPurpose'] = 'V508.01: decode the #json= fragment with URL decoding; it is plain compact JSON, not zlib.'
     return micro
 
 
@@ -9288,7 +9288,7 @@ def _v50706_tiny_final_report_payload(run: dict[str, Any], key: str | None, run_
     """Very small report copy for ChatGPT in the URL fragment.
 
     V507.05 proved that a completely short dynamic URL can be unreadable to
-    external ChatGPT fetch when the runtime cache is not visible. V507.06 uses a
+    external ChatGPT fetch when the runtime cache is not visible. V508.01 uses a
     bounded #r= fragment: only counters and compact failure groups are embedded,
     while the full HTML dashboard and JSON links remain on the server.
     """
@@ -9338,7 +9338,7 @@ def _v50706_encode_tiny_final_report_fragment(payload: dict[str, Any]) -> str:
 
 
 def _v50606_final_report_path_with_snapshot(run: dict[str, Any], run_id: str, key: str | None = None) -> str:
-    # V507.06: keep the operator link much shorter than V507.04, but still
+    # V508.01: keep the operator link much shorter than V507.04, but still
     # self-contained for ChatGPT. The tiny #r= fragment embeds only summary
     # counters and failure groups, not the full JSON/evidence/resultText.
     path = _browser_audit_final_report_path(run_id, key)
@@ -9830,7 +9830,7 @@ def _browser_audit_operator_html(request: Request, payload: dict[str, Any], *, k
     technical_json = json.dumps(payload, ensure_ascii=False, indent=2)
     return f'''<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="robots" content="noindex"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V507.06 generalized symbolic/API UI-render live-аудит</title>
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V508.01 generalized symbolic/API UI-render live-аудит</title>
 <style>
 body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;margin:28px auto;padding:0 16px;line-height:1.45;background:#f8fafc;color:#111827}}
 .box{{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:20px;margin:16px 0;box-shadow:0 8px 22px rgba(15,23,42,.05)}}
@@ -9838,10 +9838,10 @@ body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;ma
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px}}.metric{{background:#f3f4f6;border-radius:14px;padding:12px}}.metric b{{display:block;font-size:24px}}
 .bar{{height:18px;background:#e5e7eb;border-radius:999px;overflow:hidden}}.fill{{height:100%;width:{pct}%;background:#111827}}input{{box-sizing:border-box;width:100%;border:1px solid #d1d5db;border-radius:12px;padding:12px;font:15px ui-monospace,Menlo,monospace;background:#fff}}.muted{{color:#6b7280}}pre{{white-space:pre-wrap;background:#111827;color:#f9fafb;padding:14px;border-radius:14px;overflow:auto;max-height:360px}}
 </style></head><body>
-<h1>V507.06 — generalized symbolic/API UI-render audit</h1>
+<h1>V508.01 — generalized symbolic/API UI-render audit</h1>
 <section class="box">
   <h2>1. Открыть реальную frontend-страницу аудита</h2>
-  <p>V507.06 проверяет generalized symbolic/API pipeline на Excel batch 401–500 через реальный production frontend: откроется self-hosted frontend /app, где будет одна кнопка «Запустить / продолжить аудит».</p>
+  <p>V508.01 проверяет generalized symbolic/API pipeline на Excel batch 501–600 через реальный production frontend: откроется self-hosted frontend /app, где будет одна кнопка «Запустить / продолжить аудит».</p>
   <p><a class="primary" href="{escape(frontend_url, quote=True)}">Открыть аудит на frontend</a></p>
   <p class="muted">На frontend-странице аудит вводит задания в реальное поле <code>#taskInput</code>, нажимает реальную кнопку <code>#solveBtn</code>, ждёт <code>#resultBox</code> и сверяет DOM с API/expected.</p>
   <input readonly value="{escape(frontend_url, quote=True)}" onclick="this.select()">
@@ -10132,7 +10132,7 @@ def _v50702_compact_final_report_payload(run: dict[str, Any], key_value: str, ru
         'dashboardMode': 'html-page-with-labeled-links-and-json-pre',
         'fullProofEmbedded': False,
         'fullProofLinkedOnly': True,
-        'reason': 'V507.06 restores the old final-report dashboard: labeled links first, compact JSON below, no giant embedded resultText/evidence payload.',
+        'reason': 'V508.01 restores the old final-report dashboard: labeled links first, compact JSON below, no giant embedded resultText/evidence payload.',
         'runId': run.get('runId'),
         'status': run.get('status'),
         'section': run.get('section'),
@@ -10414,7 +10414,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v507-06-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v508-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -10761,7 +10761,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v507-06-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v508-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:
