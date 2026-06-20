@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Math AI 1-4 release/audit automation helper.
 
-V508.02 goal: remove repetitive manual GitHub Pages deployment while keeping the
+V506.02 goal: remove repetitive manual GitHub Pages deployment while keeping the
 quality gates strict. The script is intentionally conservative: it can prepare
 and validate a release package, generate the self-hosted audit URL, and check a
 final-report URL. It does not accept a batch unless all proof fields show real
@@ -9,7 +9,7 @@ API/token/DOM work.
 
 Run from the project root that contains `backend/` and `frontend/`:
 
-    python -B backend/release_pipeline.py --offset 500 --limit 100
+    python -B backend/release_pipeline.py --offset 300 --limit 100
 
 To validate a final report:
 
@@ -19,8 +19,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import html as _html
-import re
 import os
 import subprocess
 import sys
@@ -31,10 +29,10 @@ from typing import Any
 from urllib.parse import urlencode
 
 DEFAULT_BACKEND_BASE_URL = 'https://wolandvp-beep-ai-math-1-4-8e2f.twc1.net'
-DEFAULT_RELEASE = 'v508_02_excel_501_600_ui_repairs'
-DEFAULT_AUDIT_KEY = 'v508-02-live-audit'
+DEFAULT_RELEASE = 'v506_02_automation_pipeline'
+DEFAULT_AUDIT_KEY = 'v506-02-live-audit'
 DEFAULT_SECTION = 'excel_numeric_regression'
-DEFAULT_OFFSET = 500
+DEFAULT_OFFSET = 300
 DEFAULT_LIMIT = 100
 MAX_BACKEND_FILES = 100
 MAX_FRONTEND_FILES = 100
@@ -144,14 +142,7 @@ def build_zip(root: Path, out_path: Path) -> None:
 def fetch_json(url: str) -> dict[str, Any]:
     with urllib.request.urlopen(url, timeout=60) as resp:
         data = resp.read()
-    text = data.decode('utf-8')
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r'<h2>JSON</h2><pre>(.*?)</pre>', text, flags=re.S | re.I)
-        if not match:
-            raise
-        return json.loads(_html.unescape(match.group(1)))
+    return json.loads(data.decode('utf-8'))
 
 
 def gate_report(report: dict[str, Any], planned: int | None = None) -> tuple[bool, list[str]]:
@@ -188,7 +179,7 @@ def gate_report(report: dict[str, Any], planned: int | None = None) -> tuple[boo
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description='Math AI 1-4 V507 release/audit pipeline helper')
+    parser = argparse.ArgumentParser(description='Math AI 1-4 V506 release/audit pipeline helper')
     parser.add_argument('--release', default=DEFAULT_RELEASE)
     parser.add_argument('--audit-key', default=DEFAULT_AUDIT_KEY)
     parser.add_argument('--section', default=DEFAULT_SECTION)
