@@ -14,7 +14,7 @@ import mimetypes
 import zipfile
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode, unquote
+from urllib.parse import urlencode, unquote, quote
 from html import escape
 
 import httpx
@@ -195,7 +195,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('offset', '300'),
         ('limit', '100'),
         ('autoStart', '1'),
-        ('cacheBust', 'v506-06-self-contained-json-report'),
+        ('cacheBust', 'v506-07-robust-json-snapshot'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -221,7 +221,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V506.06 — generalized symbolic/API audit / batch 301–400 with strict anti-memorization',
+        'nextAuditPlannedMapStep': 'V506.07 — generalized symbolic/API audit / batch 301–400 with strict anti-memorization',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -256,7 +256,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditQueryOrderSafe': True,
         'nextAuditNoSectionEntityRisk': True,
         'nextAuditNoQueryParamReorderRisk': True,
-        'nextAuditNote': 'V506.06 запускает batch 301–400 через self-hosted frontend /app или GitHub Pages fallback: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
+        'nextAuditNote': 'V506.07 запускает batch 301–400 через self-hosted frontend /app или GitHub Pages fallback: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
     }
 
 
@@ -273,7 +273,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v506-06-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v506-07-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3717,7 +3717,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v506-06-self-contained-json-report-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v506-07-robust-json-snapshot-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -5210,7 +5210,7 @@ def _live_audit_evidence_row(row: dict[str, Any]) -> dict[str, Any]:
         'uiRenderPassed': _live_audit_ui_render_passed(row),
         'uiRenderIssues': row.get('uiRenderIssues') or [],
     }
-    # V506.06: flatten nested API/symbolic arbitration evidence into each audit
+    # V506.07: flatten nested API/symbolic arbitration evidence into each audit
     # evidence row.  Earlier reports showed zero aggregate API-primary counters
     # even though structuredSolution contained the proof.
     st = row.get('structuredSolution') if isinstance(row.get('structuredSolution'), dict) else {}
@@ -6124,7 +6124,7 @@ def _live_audit_public_run_summary(run: dict[str, Any], *, include_failures_prev
             }
             for item in evidence_rows if isinstance(item, dict) and isinstance(item.get('v501AiPipelineEvidence'), dict)
         ][:5],
-        'v501QualityNote': 'V506.06 records raw DeepSeek text, preserves self-consistent API numbers and symbolic expressions, requires zero unjustified case-specific repairs, and uses Excel only as external audit evidence.',
+        'v501QualityNote': 'V506.07 records raw DeepSeek text, preserves self-consistent API numbers and symbolic expressions, requires zero unjustified case-specific repairs, and uses Excel only as external audit evidence.',
         'uiDomProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('frontendDomRenderedOutputChecked')]),
         'uiResultBoxProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('uiResultBoxFound')]),
         'uiSolveButtonClickProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('uiSolveButtonClicked')]),
@@ -7210,9 +7210,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v506-06-self-contained-json-report',
+        'visibleResultContract': 'v506-07-robust-json-snapshot',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v506-06-self-contained-json-report',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v506-07-robust-json-snapshot',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -7992,7 +7992,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v506-06-self-contained-json-report'),
+        ('cacheBust', 'v506-07-robust-json-snapshot'),
     ])
     return {
         **summary,
@@ -8600,18 +8600,116 @@ def _v50606_decode_final_report_snapshot(token: str) -> dict[str, Any] | None:
     return {'diagnostic': 'live-audit-final-report-snapshot-error', 'error': 'decoded snapshot is not an object'}
 
 
+def _v50607_snapshot_is_error(payload: dict[str, Any] | None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    return str(payload.get('diagnostic') or '').endswith('snapshot-error') or bool(payload.get('error'))
+
+
+def _v50607_decode_any_final_report_snapshot(snapshot: str = '', snapshot2: str = '') -> dict[str, Any] | None:
+    last_error: dict[str, Any] | None = None
+    for token in (snapshot, snapshot2):
+        payload = _v50606_decode_final_report_snapshot(token)
+        if payload is None:
+            continue
+        if not _v50607_snapshot_is_error(payload):
+            return payload
+        last_error = payload
+    return last_error
+
+
+def _v50607_micro_final_report_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Small, plain JSON copy placed in the URL fragment for ChatGPT.
+
+    The HTML dashboard still contains the full compact JSON. The fragment keeps
+    only the fields needed to accept/reject a batch and group failures, so it is
+    readable after URL decoding and does not depend on the temporary run cache.
+    """
+    keep = [
+        'release', 'backendBuild', 'solverVersion', 'diagnostic', 'finalReportFormat',
+        'runId', 'status', 'section', 'offset', 'limit', 'planned', 'completed',
+        'remaining', 'passed', 'failed', 'finalAcceptance', 'acceptancePassed',
+        'acceptanceIssuesCount', 'acceptanceIssues', 'externalApiCalls',
+        'externalApiCompleted', 'externalApiBlocked', 'externalApiErrors',
+        'deepseekUsageProofs', 'apiPromptTokens', 'apiCompletionTokens',
+        'apiTotalTokens', 'promptCacheHitTokens', 'promptCacheMissTokens',
+        'cachedResults', 'browserClientFetchCalls', 'browserClientFetchCompleted',
+        'evidenceResultsCount', 'caseProofsTotal', 'numericComparableCount',
+        'numericPassedCount', 'numericFailedCount', 'numericSkippedCount',
+        'uiDomProofs', 'uiResultBoxProofs', 'uiSolveButtonClickProofs',
+        'uiDomApiMatchProofs', 'uiRenderPassedProofs', 'suspiciousCount',
+        'suspiciousPassedCount', 'v500GeneralRuleCounts', 'v500TemplateEvidenceCount',
+        'v500GeneralRuleRowCount', 'v500NoTemplateEvidenceCount',
+        'v500CaseSpecificRepairCount', 'v500TemplateCoverageRequiredMin',
+        'v500TemplateCoverageRatio', 'v501ApiPrimaryVerifiedCount',
+        'v501LearningCoverageCount', 'v501LearningCoverageRatio',
+        'v501NoLearningEvidenceCount', 'v500GeneralizationAcceptance',
+        'v500GeneralizationIssues', 'failureIssueGroups', 'failuresTotal',
+        'failuresReturned', 'failures', 'numericFailuresTotal',
+        'numericFailuresReturned', 'numericFailures', 'suspiciousTotal',
+        'suspiciousReturned', 'suspicious',
+    ]
+    micro = {key: payload.get(key) for key in keep if key in payload}
+
+    def crop_row(row: Any) -> Any:
+        if not isinstance(row, dict):
+            return row
+        out = dict(row)
+        for key in ('inputPreview', 'inputText'):
+            if key in out:
+                out[key] = str(out.get(key) or '')[:260]
+        for key in ('actualAnswerLine', 'numericComparisonIssue'):
+            if key in out:
+                out[key] = str(out.get(key) or '')[:260]
+        if isinstance(out.get('issues'), list):
+            out['issues'] = [str(x)[:220] for x in out['issues'][:8]]
+        if isinstance(out.get('suspiciousReasons'), list):
+            out['suspiciousReasons'] = [str(x)[:220] for x in out['suspiciousReasons'][:8]]
+        if isinstance(out.get('actualNumericTokens'), list):
+            out['actualNumericTokens'] = [str(x)[:80] for x in out['actualNumericTokens'][:10]]
+        return out
+
+    for key in ('failures', 'numericFailures', 'suspicious'):
+        if isinstance(micro.get(key), list):
+            micro[key] = [crop_row(row) for row in micro[key]]
+    if isinstance(micro.get('failureIssueGroups'), list):
+        groups = []
+        for item in micro['failureIssueGroups']:
+            if isinstance(item, dict):
+                g = dict(item)
+                g['issue'] = str(g.get('issue') or '')[:220]
+                if isinstance(g.get('example'), dict):
+                    g['example'] = crop_row(g.get('example'))
+                groups.append(g)
+            else:
+                groups.append(item)
+        micro['failureIssueGroups'] = groups
+    micro['chatgptPlainJsonFragment'] = True
+    micro['fragmentPurpose'] = 'V506.07: decode the #json= fragment with URL decoding; it is plain compact JSON, not zlib.'
+    return micro
+
+
 def _v50606_final_report_path_with_snapshot(run: dict[str, Any], run_id: str, key: str | None = None) -> str:
     base_path = _browser_audit_final_report_path(run_id, key)
     try:
-        payload = _v50605_compact_final_report_payload(run, str(key or LIVE_PRODUCTION_AUDIT_DEFAULT_KEY), run_id)
+        payload = _v50607_compact_final_report_payload(run, str(key or LIVE_PRODUCTION_AUDIT_DEFAULT_KEY), run_id)
         payload['selfContainedFinalReportUrl'] = True
-        payload['snapshotPurpose'] = 'V506.06: the ordinary final-report link carries this compact JSON snapshot in ?snapshot= so ChatGPT can read it even when the temporary run cache is not fetchable.'
+        payload['snapshotPurpose'] = 'V506.07: the ordinary final-report link carries redundant compact JSON snapshots in ?snapshot= and ?snapshot2=, plus a plain #json= fragment for ChatGPT when temporary run cache is not fetchable.'
         token = _v50606_encode_final_report_snapshot(payload)
-        # Avoid producing impractically long URLs. If the snapshot is unexpectedly
-        # large, fall back to the normal live endpoint; the HTML page still works
-        # for a human browser while we keep the URL safe.
+        query_pairs: list[tuple[str, str]] = []
         if token and len(token) <= 90000:
-            return base_path + '?' + urlencode([('snapshot', token)])
+            query_pairs.append(('snapshot', token))
+            # Duplicate the compressed token. If one opaque token is damaged while
+            # being copied through chat, the second one often remains recoverable.
+            query_pairs.append(('snapshot2', token))
+        path = base_path + (('?' + urlencode(query_pairs)) if query_pairs else '')
+        micro = _v50607_micro_final_report_payload(payload)
+        plain = json.dumps(micro, ensure_ascii=True, separators=(',', ':'), default=str)
+        # Keep the fragment below a conservative size. It is not sent to the server,
+        # but it remains visible in the copied link and is easy for ChatGPT to parse.
+        if len(plain) <= 75000:
+            path += '#json=' + quote(plain, safe='')
+        return path
     except Exception:
         pass
     return base_path
@@ -9093,7 +9191,7 @@ def _browser_audit_operator_html(request: Request, payload: dict[str, Any], *, k
     technical_json = json.dumps(payload, ensure_ascii=False, indent=2)
     return f'''<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="robots" content="noindex"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V506.06 generalized symbolic/API UI-render live-аудит</title>
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V506.07 generalized symbolic/API UI-render live-аудит</title>
 <style>
 body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;margin:28px auto;padding:0 16px;line-height:1.45;background:#f8fafc;color:#111827}}
 .box{{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:20px;margin:16px 0;box-shadow:0 8px 22px rgba(15,23,42,.05)}}
@@ -9101,10 +9199,10 @@ body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;ma
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px}}.metric{{background:#f3f4f6;border-radius:14px;padding:12px}}.metric b{{display:block;font-size:24px}}
 .bar{{height:18px;background:#e5e7eb;border-radius:999px;overflow:hidden}}.fill{{height:100%;width:{pct}%;background:#111827}}input{{box-sizing:border-box;width:100%;border:1px solid #d1d5db;border-radius:12px;padding:12px;font:15px ui-monospace,Menlo,monospace;background:#fff}}.muted{{color:#6b7280}}pre{{white-space:pre-wrap;background:#111827;color:#f9fafb;padding:14px;border-radius:14px;overflow:auto;max-height:360px}}
 </style></head><body>
-<h1>V506.06 — generalized symbolic/API UI-render audit</h1>
+<h1>V506.07 — generalized symbolic/API UI-render audit</h1>
 <section class="box">
   <h2>1. Открыть реальную frontend-страницу аудита</h2>
-  <p>V506.06 проверяет generalized symbolic/API pipeline на Excel batch 301–400 через реальный production frontend: откроется self-hosted frontend /app, где будет одна кнопка «Запустить / продолжить аудит».</p>
+  <p>V506.07 проверяет generalized symbolic/API pipeline на Excel batch 301–400 через реальный production frontend: откроется self-hosted frontend /app, где будет одна кнопка «Запустить / продолжить аудит».</p>
   <p><a class="primary" href="{escape(frontend_url, quote=True)}">Открыть аудит на frontend</a></p>
   <p class="muted">На frontend-странице аудит вводит задания в реальное поле <code>#taskInput</code>, нажимает реальную кнопку <code>#solveBtn</code>, ждёт <code>#resultBox</code> и сверяет DOM с API/expected.</p>
   <input readonly value="{escape(frontend_url, quote=True)}" onclick="this.select()">
@@ -9360,7 +9458,7 @@ def _v50603_rule_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
 
 
 
-def _v50605_compact_final_report_payload(run: dict[str, Any], key_value: str, run_id_value: str) -> dict[str, Any]:
+def _v50607_compact_final_report_payload(run: dict[str, Any], key_value: str, run_id_value: str) -> dict[str, Any]:
     """Compact JSON payload used inside the HTML dashboard and by /final-report-json.
 
     This restores the old operator workflow: the user sends one final-report URL,
@@ -9389,13 +9487,13 @@ def _v50605_compact_final_report_payload(run: dict[str, Any], key_value: str, ru
         'backendBuild': APP_RELEASE,
         'solverVersion': SOLVER_VERSION,
         'diagnostic': 'live-audit-final-report-html-json-index',
-        'finalReportFormat': 'html-dashboard-json-pre-v50605',
+        'finalReportFormat': 'html-dashboard-json-pre-v50607',
         'singleLinkForChatGPT': True,
         'jsonReadableByChatGPT': True,
         'dashboardMode': 'html-page-with-labeled-links-and-json-pre',
         'fullProofEmbedded': False,
         'fullProofLinkedOnly': True,
-        'reason': 'V506.06 restores the old final-report dashboard: labeled links first, compact JSON below, no giant embedded resultText/evidence payload.',
+        'reason': 'V506.07 restores the old final-report dashboard: labeled links first, compact JSON below, no giant embedded resultText/evidence payload.',
         'runId': run.get('runId'),
         'status': run.get('status'),
         'section': run.get('section'),
@@ -9496,9 +9594,9 @@ def _v50605_compact_final_report_payload(run: dict[str, Any], key_value: str, ru
 
 
 @app.get('/api/diagnostics/live-audit/final-report-json/{release_token}/{key_value}/{run_id_value}')
-async def live_audit_browser_final_report_json(release_token: str, key_value: str, run_id_value: str, snapshot: str = ''):
+async def live_audit_browser_final_report_json(release_token: str, key_value: str, run_id_value: str, snapshot: str = '', snapshot2: str = ''):
     """Direct compact JSON endpoint for tooling. The operator still sends /final-report/."""
-    snapshot_payload = _v50606_decode_final_report_snapshot(snapshot)
+    snapshot_payload = _v50607_decode_any_final_report_snapshot(snapshot, snapshot2)
     if snapshot_payload is not None:
         snapshot_payload.setdefault('release', release_token)
         snapshot_payload.setdefault('auditKey', key_value)
@@ -9507,13 +9605,13 @@ async def live_audit_browser_final_report_json(release_token: str, key_value: st
     run = _live_audit_load_run_for_read(key_value, run_id_value, release_token, 'live-audit-final-report-json')
     if isinstance(run, JSONResponse):
         return run
-    return _json_ok(_v50605_compact_final_report_payload(run, key_value, run_id_value))
+    return _json_ok(_v50607_compact_final_report_payload(run, key_value, run_id_value))
 
 
 @app.get('/api/diagnostics/live-audit/final-report/{release_token}/{key_value}/{run_id_value}')
-async def live_audit_browser_final_report(release_token: str, key_value: str, run_id_value: str, snapshot: str = ''):
+async def live_audit_browser_final_report(release_token: str, key_value: str, run_id_value: str, snapshot: str = '', snapshot2: str = ''):
     """HTML dashboard final report with visible labeled links and compact JSON."""
-    snapshot_payload = _v50606_decode_final_report_snapshot(snapshot)
+    snapshot_payload = _v50607_decode_any_final_report_snapshot(snapshot, snapshot2)
     if snapshot_payload is not None:
         payload = snapshot_payload
         payload.setdefault('release', release_token)
@@ -9523,7 +9621,7 @@ async def live_audit_browser_final_report(release_token: str, key_value: str, ru
         run = _live_audit_load_run_for_read(key_value, run_id_value, release_token, 'live-audit-final-report-html-json-index')
         if isinstance(run, JSONResponse):
             return run
-        payload = _v50605_compact_final_report_payload(run, key_value, run_id_value)
+        payload = _v50607_compact_final_report_payload(run, key_value, run_id_value)
     endpoints = payload.get('fullProofEndpoints') if isinstance(payload.get('fullProofEndpoints'), dict) else {}
     extra_links = [
         ('Open compact JSON final report', endpoints.get('jsonFinalReport') or payload.get('jsonFinalReport') or ''),
@@ -9677,7 +9775,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v506-06-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v506-07-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -10024,7 +10122,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v506-06-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v506-07-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:
