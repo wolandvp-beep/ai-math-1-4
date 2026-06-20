@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v506_07_robust_json_snapshot'
-SOLVER_VERSION = 'v506-07-robust-json-snapshot'
+APP_RELEASE = 'v506_08_valya_examples_proof'
+SOLVER_VERSION = 'v506-08-valya-examples-proof'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -11639,6 +11639,16 @@ def _v50601_semantic_step_explanation(original_text: str, *, step_index: int, st
         if 'рябин' in qlow: return 'всего рябины'
         if 'гряд' in qlow: return 'всего грядок с морковкой и укропом'
         return 'всего'
+    # V506.08: for reusable "examples on addition/subtraction" tasks,
+    # a bare tail such as "на вычитание" is grammatically understandable
+    # but not a sufficient school explanation: it does not name the counted
+    # object.  Normalize it before preserving raw DeepSeek tails.  This keeps
+    # the verified arithmetic/API number unchanged and fixes the visible proof
+    # shape generally for the family, not by Excel row id.
+    if 'вычитан' in low and 'пример' in low and step_index == 0:
+        if not raw_key or raw_key in {'на вычитание', 'вычитание', 'примеров'} or re.search(r'\bвычитан', raw_key):
+            return 'примеров на вычитание'
+
     if not bad:
         # Keep useful DeepSeek explanations, but remove a leading generic "всего"
         # from an intermediate step.
@@ -12388,7 +12398,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v506-07-robust-json-snapshot'
+    marker = 'v506-08-valya-examples-proof'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -13010,7 +13020,7 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
     if isinstance(special_non_numeric, dict):
         return _v4013_finalize_payload_text(special_non_numeric, original_text)
 
-    # V506.07 symbolic family gate. A valid raw DeepSeek/API expression is
+    # V506.08 symbolic family gate. A valid raw DeepSeek/API expression is
     # accepted through a reusable structural template before legacy exact maps.
     payload = _v500_attach_existing_self_verifier(payload) if isinstance(payload, dict) else payload
     symbolic_candidate = _v50601_raw_symbolic_candidate(payload, original_text)
@@ -13019,7 +13029,7 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
         if isinstance(symbolic_primary, dict):
             return symbolic_primary
 
-    # V506.07 authoritative numeric API gate. Verify arithmetic before any
+    # V506.08 authoritative numeric API gate. Verify arithmetic before any
     # semantic template or legacy repair can touch the number.
     authoritative_candidate = _v501_raw_api_answer_candidate(payload)
     if authoritative_candidate.get('trusted'):
