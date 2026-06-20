@@ -195,7 +195,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('offset', '300'),
         ('limit', '100'),
         ('autoStart', '1'),
-        ('cacheBust', 'v506-02-automation-pipeline'),
+        ('cacheBust', 'v506-03-compact-final-report'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -221,7 +221,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V506.02 — generalized symbolic/API audit / batch 301–400 with strict anti-memorization',
+        'nextAuditPlannedMapStep': 'V506.03 — generalized symbolic/API audit / batch 301–400 with strict anti-memorization',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -256,7 +256,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditQueryOrderSafe': True,
         'nextAuditNoSectionEntityRisk': True,
         'nextAuditNoQueryParamReorderRisk': True,
-        'nextAuditNote': 'V506.02 запускает batch 301–400 через self-hosted frontend /app или GitHub Pages fallback: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
+        'nextAuditNote': 'V506.03 запускает batch 301–400 через self-hosted frontend /app или GitHub Pages fallback: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
     }
 
 
@@ -273,7 +273,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v506-02-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v506-03-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3717,7 +3717,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v506-02-automation-pipeline-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v506-03-compact-final-report-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -5210,7 +5210,7 @@ def _live_audit_evidence_row(row: dict[str, Any]) -> dict[str, Any]:
         'uiRenderPassed': _live_audit_ui_render_passed(row),
         'uiRenderIssues': row.get('uiRenderIssues') or [],
     }
-    # V506.02: flatten nested API/symbolic arbitration evidence into each audit
+    # V506.03: flatten nested API/symbolic arbitration evidence into each audit
     # evidence row.  Earlier reports showed zero aggregate API-primary counters
     # even though structuredSolution contained the proof.
     st = row.get('structuredSolution') if isinstance(row.get('structuredSolution'), dict) else {}
@@ -6124,7 +6124,7 @@ def _live_audit_public_run_summary(run: dict[str, Any], *, include_failures_prev
             }
             for item in evidence_rows if isinstance(item, dict) and isinstance(item.get('v501AiPipelineEvidence'), dict)
         ][:5],
-        'v501QualityNote': 'V506.02 records raw DeepSeek text, preserves self-consistent API numbers and symbolic expressions, requires zero unjustified case-specific repairs, and uses Excel only as external audit evidence.',
+        'v501QualityNote': 'V506.03 records raw DeepSeek text, preserves self-consistent API numbers and symbolic expressions, requires zero unjustified case-specific repairs, and uses Excel only as external audit evidence.',
         'uiDomProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('frontendDomRenderedOutputChecked')]),
         'uiResultBoxProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('uiResultBoxFound')]),
         'uiSolveButtonClickProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('uiSolveButtonClicked')]),
@@ -7210,9 +7210,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v506-02-automation-pipeline',
+        'visibleResultContract': 'v506-03-compact-final-report',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v506-02-automation-pipeline',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v506-03-compact-final-report',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -7991,7 +7991,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v506-02-automation-pipeline'),
+        ('cacheBust', 'v506-03-compact-final-report'),
     ])
     return {
         **summary,
@@ -9039,7 +9039,7 @@ def _browser_audit_operator_html(request: Request, payload: dict[str, Any], *, k
     technical_json = json.dumps(payload, ensure_ascii=False, indent=2)
     return f'''<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="robots" content="noindex"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V506.02 generalized symbolic/API UI-render live-аудит</title>
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V506.03 generalized symbolic/API UI-render live-аудит</title>
 <style>
 body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;margin:28px auto;padding:0 16px;line-height:1.45;background:#f8fafc;color:#111827}}
 .box{{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:20px;margin:16px 0;box-shadow:0 8px 22px rgba(15,23,42,.05)}}
@@ -9047,10 +9047,10 @@ body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;ma
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px}}.metric{{background:#f3f4f6;border-radius:14px;padding:12px}}.metric b{{display:block;font-size:24px}}
 .bar{{height:18px;background:#e5e7eb;border-radius:999px;overflow:hidden}}.fill{{height:100%;width:{pct}%;background:#111827}}input{{box-sizing:border-box;width:100%;border:1px solid #d1d5db;border-radius:12px;padding:12px;font:15px ui-monospace,Menlo,monospace;background:#fff}}.muted{{color:#6b7280}}pre{{white-space:pre-wrap;background:#111827;color:#f9fafb;padding:14px;border-radius:14px;overflow:auto;max-height:360px}}
 </style></head><body>
-<h1>V506.02 — generalized symbolic/API UI-render audit</h1>
+<h1>V506.03 — generalized symbolic/API UI-render audit</h1>
 <section class="box">
   <h2>1. Открыть реальную frontend-страницу аудита</h2>
-  <p>V506.02 проверяет generalized symbolic/API pipeline на Excel batch 301–400 через реальный production frontend: откроется self-hosted frontend /app, где будет одна кнопка «Запустить / продолжить аудит».</p>
+  <p>V506.03 проверяет generalized symbolic/API pipeline на Excel batch 301–400 через реальный production frontend: откроется self-hosted frontend /app, где будет одна кнопка «Запустить / продолжить аудит».</p>
   <p><a class="primary" href="{escape(frontend_url, quote=True)}">Открыть аудит на frontend</a></p>
   <p class="muted">На frontend-странице аудит вводит задания в реальное поле <code>#taskInput</code>, нажимает реальную кнопку <code>#solveBtn</code>, ждёт <code>#resultBox</code> и сверяет DOM с API/expected.</p>
   <input readonly value="{escape(frontend_url, quote=True)}" onclick="this.select()">
@@ -9207,46 +9207,214 @@ async def live_audit_browser_operator(request: Request, release_token: str, key_
     return _html_ok(_browser_audit_operator_html(request, payload, key=key_value, start_mode=bool(start)))
 
 
+def _v50603_text(value: Any, limit: int = 220) -> str:
+    text = str(value or '').replace('\r', ' ').strip()
+    text = re.sub(r'\s+', ' ', text)
+    if len(text) <= limit:
+        return text
+    return text[:max(0, limit - 1)].rstrip() + '…'
+
+
+def _v50603_mini_audit_row(row: dict[str, Any]) -> dict[str, Any]:
+    result_text = str(row.get('resultText') or row.get('resultPreview') or '')
+    issues_raw = row.get('issues') or []
+    if not issues_raw and row.get('numericComparisonIssue'):
+        issues_raw = [row.get('numericComparisonIssue')]
+    issues = [_v50603_text(item, 180) for item in list(issues_raw)[:6]]
+    suspicious_raw = row.get('suspiciousReasons') or []
+    compact = {
+        'caseIndex': row.get('caseIndex'),
+        'excelRowNumber': row.get('excelRowNumber'),
+        'excelId': row.get('excelId'),
+        'id': row.get('id'),
+        'name': row.get('name'),
+        'grade': row.get('grade'),
+        'category': row.get('category'),
+        'ok': bool(row.get('ok')),
+        'issues': issues,
+        'suspiciousReasons': [_v50603_text(item, 180) for item in list(suspicious_raw)[:4]],
+        'inputPreview': _v50603_text(row.get('inputText') or row.get('plannedInputText') or row.get('apiRequestedText'), 180),
+        'expectedFinalAnswer': _v50603_text(row.get('expectedFinalAnswer'), 160),
+        'expectedNumericAnswer': row.get('expectedNumericAnswer'),
+        'expectedUnit': row.get('expectedUnit'),
+        'actualAnswerNumber': row.get('actualAnswerNumber'),
+        'actualAnswerNumberSource': row.get('actualAnswerNumberSource'),
+        'actualAnswerLine': _v50603_text(row.get('actualAnswerLine') or _live_audit_extract_answer_line(result_text), 180),
+        'numericComparable': row.get('numericComparable'),
+        'numericPassed': row.get('numericPassed'),
+        'numericComparisonIssue': _v50603_text(row.get('numericComparisonIssue'), 180),
+        'source': row.get('source'),
+        'externalApiAttempts': int(row.get('externalApiAttempts') or 0),
+        'externalApiCompleted': int(row.get('externalApiCompleted') or 0),
+        'externalApiErrors': int(row.get('externalApiErrors') or 0),
+        'apiTotalTokens': int(row.get('apiTotalTokens') or row.get('deepseekTotalTokens') or 0),
+        'browserClientFetch': bool(row.get('browserClientFetch')),
+        'uiRenderPassed': _live_audit_ui_render_passed(row),
+        'uiResultBoxFound': bool(row.get('uiResultBoxFound')),
+        'uiSolveButtonClicked': bool(row.get('uiSolveButtonClicked')),
+        'uiDomResultMatchesApi': bool(row.get('uiDomResultMatchesApi')),
+        'v500GeneralRule': row.get('v500GeneralRule') or (row.get('structuredSolution', {}).get('v500Rule') if isinstance(row.get('structuredSolution'), dict) else None),
+        'v500CaseSpecificRepair': bool(row.get('v500CaseSpecificRepair')),
+        'v501ApiAnswerUsedAsPrimary': bool(row.get('v501ApiAnswerUsedAsPrimary')),
+        'v501ApiCandidateTrusted': bool(row.get('v501ApiCandidateTrusted')),
+        'v50503TrustedApiNumberPreserved': bool(row.get('v50503TrustedApiNumberPreserved')),
+        'resultPreview': _v50603_text(result_text, 260),
+    }
+    compact['proofHash'] = row.get('proofHash') or _short_hash({
+        'i': compact.get('caseIndex'),
+        'input': compact.get('inputPreview'),
+        'expected': compact.get('expectedFinalAnswer') or compact.get('expectedNumericAnswer'),
+        'actual': compact.get('actualAnswerLine'),
+        'ok': compact.get('ok'),
+    }, 16)
+    return compact
+
+
+def _v50603_issue_groups(rows: list[dict[str, Any]], *, limit: int = 20) -> list[dict[str, Any]]:
+    counts: dict[str, int] = {}
+    examples: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        issues = list(row.get('issues') or [])
+        if not issues and row.get('numericComparisonIssue'):
+            issues = [row.get('numericComparisonIssue')]
+        if not issues and row.get('suspiciousReasons'):
+            issues = list(row.get('suspiciousReasons') or [])
+        if not issues:
+            issues = ['unknown failure']
+        for issue in issues[:4]:
+            key = _v50603_text(issue, 180) or 'unknown failure'
+            counts[key] = counts.get(key, 0) + 1
+            examples.setdefault(key, _v50603_mini_audit_row(row))
+    ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]
+    return [{'issue': issue, 'count': count, 'example': examples.get(issue)} for issue, count in ordered]
+
+
+def _v50603_rule_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        rule = row.get('v500GeneralRule')
+        if not rule and isinstance(row.get('structuredSolution'), dict):
+            rule = row.get('structuredSolution', {}).get('v500Rule')
+        if rule:
+            key = str(rule)
+            counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 @app.get('/api/diagnostics/live-audit/final-report/{release_token}/{key_value}/{run_id_value}')
 async def live_audit_browser_final_report(release_token: str, key_value: str, run_id_value: str):
-    """Compact machine-readable final report.
+    """Ultra-compact machine-readable final report for ChatGPT.
 
-    Previous builds rendered one huge HTML page containing fullResultsPayload and
-    evidencePayload for up to 500 rows. Browsers could display it, but ChatGPT's
-    web reader could fail before seeing the JSON. V406 keeps the one-link
-    workflow, but returns compact JSON focused on acceptance, failures and
-    suspicious rows. Full proof endpoints are still available from the payload.
+    V506.03 intentionally avoids embedding the full report/evidence/result text.
+    The previous compact endpoint still duplicated report + failures + suspicious
+    + acceptance + compact results, which could become too large for readers.
+    This endpoint keeps the one-link workflow but returns only counters, grouped
+    issues and short failure rows needed for the next fix.
     """
-    report = await live_audit_runner_report(key=key_value, runId=run_id_value, release=release_token)
-    if isinstance(report, JSONResponse):
-        return report
-    failures = await live_audit_runner_failures(key=key_value, runId=run_id_value, release=release_token, limit=200)
-    suspicious = await live_audit_runner_suspicious(key=key_value, runId=run_id_value, release=release_token)
-    acceptance = await live_audit_runner_acceptance(key=key_value, runId=run_id_value, release=release_token)
-    results_compact = await live_audit_runner_results(key=key_value, runId=run_id_value, release=release_token, includeFull=0, limit=120, offset=0)
-    for item in (failures, suspicious, acceptance, results_compact):
-        if isinstance(item, JSONResponse):
-            return item
+    run = _live_audit_load_run_for_read(key_value, run_id_value, release_token, 'live-audit-final-report-ultra-compact')
+    if isinstance(run, JSONResponse):
+        return run
+    evidence_rows = _live_audit_results_for_payload(run, include_full=False)
+    evidence_rows = _live_audit_apply_duplicate_suspicion(evidence_rows)
+    failures_full = [item for item in list(run.get('failures') or []) if isinstance(item, dict)]
+    if not failures_full:
+        failures_full = [row for row in evidence_rows if isinstance(row, dict) and not row.get('ok')]
+    numeric_failed = [row for row in evidence_rows if isinstance(row, dict) and row.get('numericComparable') and row.get('numericPassed') is not True]
+    suspicious = [row for row in evidence_rows if isinstance(row, dict) and row.get('suspiciousReasons')]
+    numeric_rows = [row for row in evidence_rows if isinstance(row, dict) and row.get('numericComparable')]
+    numeric_passed = [row for row in numeric_rows if row.get('numericPassed') is True]
+    learning = _v500_learning_metrics(evidence_rows, run)
+    acceptance_issues = _live_audit_acceptance_blockers(run)
+    final_acceptance = not acceptance_issues
+    max_failures = 70
+    max_numeric_failures = 40
+    max_suspicious = 30
     payload = {
-        **dict(report),
-        'diagnostic': 'live-audit-browser-final-report-compact-json',
-        'finalReportFormat': 'compact-json-v500',
+        'release': APP_RELEASE,
+        'backendBuild': APP_RELEASE,
+        'solverVersion': SOLVER_VERSION,
+        'diagnostic': 'live-audit-final-report-ultra-compact-json',
+        'finalReportFormat': 'compact-json-v50603',
         'singleLinkForChatGPT': True,
-        'operatorInstruction': 'Скопируйте URL этой страницы и пришлите ChatGPT. Это компактный JSON: acceptance, failures, suspicious и compact case proofs. Полные proof endpoints остаются в ссылках ниже.',
-        'compactReportReason': 'full HTML JSON proof was too large for some automated readers; final-report now returns compact JSON directly',
-        'fullResultsPayloadOmitted': True,
-        'evidencePayloadOmitted': True,
-        'failuresPayload': failures,
-        'suspiciousPayload': suspicious,
-        'acceptancePayload': acceptance,
-        'compactResultsPayload': results_compact,
+        'fullProofOmitted': True,
+        'reason': 'V506.03 final-report omits full report/evidence/resultText so ChatGPT can read the audit without a giant JSON payload.',
+        'runId': run.get('runId'),
+        'status': run.get('status'),
+        'section': run.get('section'),
+        'offset': run.get('offset'),
+        'limit': run.get('limit'),
+        'planned': int(run.get('planned') or 0),
+        'completed': int(run.get('completed') or 0),
+        'remaining': max(0, int(run.get('planned') or 0) - int(run.get('completed') or 0)),
+        'passed': int(run.get('passed') or 0),
+        'failed': int(run.get('failed') or 0),
+        'finalAcceptance': final_acceptance,
+        'acceptancePassed': final_acceptance,
+        'acceptanceIssuesCount': len(acceptance_issues),
+        'acceptanceIssues': [_v50603_text(item, 240) for item in acceptance_issues[:30]],
+        'externalApiCalls': int(run.get('externalApiCalls') or 0),
+        'externalApiCompleted': int(run.get('externalApiCompleted') or 0),
+        'externalApiBlocked': int(run.get('externalApiBlocked') or 0),
+        'externalApiErrors': int(run.get('externalApiErrors') or 0),
+        'deepseekUsageProofs': int(run.get('deepseekUsageProofs') or 0),
+        'apiPromptTokens': int(run.get('apiPromptTokens') or run.get('deepseekPromptTokens') or 0),
+        'apiCompletionTokens': int(run.get('apiCompletionTokens') or run.get('deepseekCompletionTokens') or 0),
+        'apiTotalTokens': int(run.get('apiTotalTokens') or run.get('deepseekTotalTokens') or 0),
+        'promptCacheHitTokens': int(run.get('promptCacheHitTokens') or 0),
+        'promptCacheMissTokens': int(run.get('promptCacheMissTokens') or 0),
+        'cachedResults': int(run.get('cachedResults') or 0),
+        'browserClientFetchCalls': int(run.get('browserClientFetchCalls') or 0),
+        'browserClientFetchCompleted': int(run.get('browserClientFetchCompleted') or 0),
+        'evidenceResultsCount': len(evidence_rows),
+        'caseProofsTotal': len(evidence_rows),
+        'numericComparableCount': len(numeric_rows),
+        'numericPassedCount': len(numeric_passed),
+        'numericFailedCount': len(numeric_failed),
+        'numericSkippedCount': len([row for row in evidence_rows if isinstance(row, dict) and row.get('numericSkipped')]),
+        'uiDomProofs': len([row for row in evidence_rows if isinstance(row, dict) and row.get('frontendDomRenderedOutputChecked')]),
+        'uiResultBoxProofs': len([row for row in evidence_rows if isinstance(row, dict) and row.get('uiResultBoxFound')]),
+        'uiSolveButtonClickProofs': len([row for row in evidence_rows if isinstance(row, dict) and row.get('uiSolveButtonClicked')]),
+        'uiDomApiMatchProofs': len([row for row in evidence_rows if isinstance(row, dict) and row.get('uiDomResultMatchesApi')]),
+        'uiRenderPassedProofs': len([row for row in evidence_rows if isinstance(row, dict) and _live_audit_ui_render_passed(row)]),
+        'suspiciousCount': len(suspicious),
+        'suspiciousPassedCount': len([row for row in suspicious if row.get('ok')]),
+        'v500GeneralRuleCounts': _v50603_rule_counts(evidence_rows),
+        **{key: learning.get(key) for key in [
+            'v500TemplateEvidenceCount',
+            'v500GeneralRuleRowCount',
+            'v500NoTemplateEvidenceCount',
+            'v500CaseSpecificRepairCount',
+            'v500TemplateCoverageRequiredMin',
+            'v500TemplateCoverageRatio',
+            'v501ApiPrimaryVerifiedCount',
+            'v501LearningCoverageCount',
+            'v501LearningCoverageRatio',
+            'v501NoLearningEvidenceCount',
+            'v500GeneralizationAcceptance',
+            'v500GeneralizationIssues',
+        ]},
+        'failureIssueGroups': _v50603_issue_groups(failures_full or numeric_failed or suspicious, limit=20),
+        'failuresTotal': len(failures_full),
+        'failuresReturned': min(max_failures, len(failures_full)),
+        'failures': [_v50603_mini_audit_row(row) for row in failures_full[:max_failures]],
+        'numericFailuresTotal': len(numeric_failed),
+        'numericFailuresReturned': min(max_numeric_failures, len(numeric_failed)),
+        'numericFailures': [_v50603_mini_audit_row(row) for row in numeric_failed[:max_numeric_failures]],
+        'suspiciousTotal': len(suspicious),
+        'suspiciousReturned': min(max_suspicious, len(suspicious)),
+        'suspicious': [_v50603_mini_audit_row(row) for row in suspicious[:max_suspicious]],
         'fullProofEndpoints': {
-            'resultsFullRun': f'/api/diagnostics/live-audit/results-full-run/{APP_RELEASE}/{key_value}/{run_id_value}',
-            'evidenceRun': f'/api/diagnostics/live-audit/evidence-run/{APP_RELEASE}/{key_value}/{run_id_value}',
+            'summaryRun': f'/api/diagnostics/live-audit/summary-run/{APP_RELEASE}/{key_value}/{run_id_value}',
             'failuresRun': f'/api/diagnostics/live-audit/failures-run/{APP_RELEASE}/{key_value}/{run_id_value}',
-            'suspiciousRun': f'/api/diagnostics/live-audit/suspicious-run/{APP_RELEASE}/{key_value}/{run_id_value}',
-            'acceptanceRun': f'/api/diagnostics/live-audit/acceptance-run/{APP_RELEASE}/{key_value}/{run_id_value}',
+            'resultsRun': f'/api/diagnostics/live-audit/results-run/{APP_RELEASE}/{key_value}/{run_id_value}',
+            'evidenceRun': f'/api/diagnostics/live-audit/evidence-run/{APP_RELEASE}/{key_value}/{run_id_value}',
+            'reportRun': f'/api/diagnostics/live-audit/report-run/{APP_RELEASE}/{key_value}/{run_id_value}',
         },
+        'operatorInstruction': 'Скопируйте URL этой страницы и пришлите ChatGPT. Это сверхкороткий отчёт: счётчики, группы ошибок и компактные failed-строки.',
     }
     return _json_ok(payload)
 
@@ -9394,7 +9562,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v506-02-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v506-03-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -9741,7 +9909,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v506-02-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v506-03-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:
