@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Math AI 1-4 release/audit automation helper.
 
-V507.03 goal: remove repetitive manual GitHub Pages deployment while keeping the
+V507.04 goal: remove repetitive manual GitHub Pages deployment while keeping the
 quality gates strict. The script is intentionally conservative: it can prepare
 and validate a release package, generate the self-hosted audit URL, and check a
 final-report URL. It does not accept a batch unless all proof fields show real
@@ -31,8 +31,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 DEFAULT_BACKEND_BASE_URL = 'https://wolandvp-beep-ai-math-1-4-8e2f.twc1.net'
-DEFAULT_RELEASE = 'v507_03_excel_401_500_repairs'
-DEFAULT_AUDIT_KEY = 'v507-03-live-audit'
+DEFAULT_RELEASE = 'v507_04_excel_401_500_ui_proof'
+DEFAULT_AUDIT_KEY = 'v507-04-live-audit'
 DEFAULT_SECTION = 'excel_numeric_regression'
 DEFAULT_OFFSET = 400
 DEFAULT_LIMIT = 100
