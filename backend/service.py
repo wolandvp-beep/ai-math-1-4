@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v507_05_short_final_report_parking'
-SOLVER_VERSION = 'v507-05-short-final-report-parking'
+APP_RELEASE = 'v507_06_short_r_report_parking'
+SOLVER_VERSION = 'v507-06-short-r-report-parking'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -11639,7 +11639,7 @@ def _v50601_semantic_step_explanation(original_text: str, *, step_index: int, st
         if 'рябин' in qlow: return 'всего рябины'
         if 'гряд' in qlow: return 'всего грядок с морковкой и укропом'
         return 'всего'
-    # V507.05: for reusable "examples on addition/subtraction" tasks,
+    # V507.06: for reusable "examples on addition/subtraction" tasks,
     # a bare tail such as "на вычитание" is grammatically understandable
     # but not a sufficient school explanation: it does not name the counted
     # object.  Normalize it before preserving raw DeepSeek tails.  This keeps
@@ -12398,7 +12398,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v507-05-short-final-report-parking'
+    marker = 'v507-06-short-r-report-parking'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -13020,7 +13020,7 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
     if isinstance(special_non_numeric, dict):
         return _v4013_finalize_payload_text(special_non_numeric, original_text)
 
-    # V507.05 symbolic family gate. A valid raw DeepSeek/API expression is
+    # V507.06 symbolic family gate. A valid raw DeepSeek/API expression is
     # accepted through a reusable structural template before legacy exact maps.
     payload = _v500_attach_existing_self_verifier(payload) if isinstance(payload, dict) else payload
     symbolic_candidate = _v50601_raw_symbolic_candidate(payload, original_text)
@@ -13029,7 +13029,7 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
         if isinstance(symbolic_primary, dict):
             return symbolic_primary
 
-    # V507.05 authoritative numeric API gate. Verify arithmetic before any
+    # V507.06 authoritative numeric API gate. Verify arithmetic before any
     # semantic template or legacy repair can touch the number.
     authoritative_candidate = _v501_raw_api_answer_candidate(payload)
     if authoritative_candidate.get('trusted'):
