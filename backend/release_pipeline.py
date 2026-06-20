@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Math AI 1-4 release/audit automation helper.
 
-V506.03 goal: remove repetitive manual GitHub Pages deployment while keeping the
+V506.05 goal: remove repetitive manual GitHub Pages deployment while keeping the
 quality gates strict. The script is intentionally conservative: it can prepare
 and validate a release package, generate the self-hosted audit URL, and check a
 final-report URL. It does not accept a batch unless all proof fields show real
@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import html as _html
+import re
 import os
 import subprocess
 import sys
@@ -29,8 +31,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 DEFAULT_BACKEND_BASE_URL = 'https://wolandvp-beep-ai-math-1-4-8e2f.twc1.net'
-DEFAULT_RELEASE = 'v506_03_compact_final_report'
-DEFAULT_AUDIT_KEY = 'v506-03-live-audit'
+DEFAULT_RELEASE = 'v506_05_json_index_final_report'
+DEFAULT_AUDIT_KEY = 'v506-05-live-audit'
 DEFAULT_SECTION = 'excel_numeric_regression'
 DEFAULT_OFFSET = 300
 DEFAULT_LIMIT = 100
@@ -142,7 +144,14 @@ def build_zip(root: Path, out_path: Path) -> None:
 def fetch_json(url: str) -> dict[str, Any]:
     with urllib.request.urlopen(url, timeout=60) as resp:
         data = resp.read()
-    return json.loads(data.decode('utf-8'))
+    text = data.decode('utf-8')
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r'<h2>JSON</h2><pre>(.*?)</pre>', text, flags=re.S | re.I)
+        if not match:
+            raise
+        return json.loads(_html.unescape(match.group(1)))
 
 
 def gate_report(report: dict[str, Any], planned: int | None = None) -> tuple[bool, list[str]]:
