@@ -195,7 +195,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('offset', '400'),
         ('limit', '100'),
         ('autoStart', '1'),
-        ('cacheBust', 'v507-04-excel-401-500-ui-proof'),
+        ('cacheBust', 'v507-05-short-final-report-parking'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -221,7 +221,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V507.04 — generalized symbolic/API audit / batch 301–400 with strict anti-memorization',
+        'nextAuditPlannedMapStep': 'V507.05 — generalized symbolic/API audit / batch 301–400 with strict anti-memorization',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -256,7 +256,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditQueryOrderSafe': True,
         'nextAuditNoSectionEntityRisk': True,
         'nextAuditNoQueryParamReorderRisk': True,
-        'nextAuditNote': 'V507.04 запускает batch 301–400 через self-hosted frontend /app или GitHub Pages fallback: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
+        'nextAuditNote': 'V507.05 запускает batch 301–400 через self-hosted frontend /app или GitHub Pages fallback: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
     }
 
 
@@ -273,7 +273,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v507-04-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v507-05-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3717,7 +3717,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v507-04-excel-401-500-ui-proof-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v507-05-short-final-report-parking-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -5210,7 +5210,7 @@ def _live_audit_evidence_row(row: dict[str, Any]) -> dict[str, Any]:
         'uiRenderPassed': _live_audit_ui_render_passed(row),
         'uiRenderIssues': row.get('uiRenderIssues') or [],
     }
-    # V507.04: flatten nested API/symbolic arbitration evidence into each audit
+    # V507.05: flatten nested API/symbolic arbitration evidence into each audit
     # evidence row.  Earlier reports showed zero aggregate API-primary counters
     # even though structuredSolution contained the proof.
     st = row.get('structuredSolution') if isinstance(row.get('structuredSolution'), dict) else {}
@@ -6124,7 +6124,7 @@ def _live_audit_public_run_summary(run: dict[str, Any], *, include_failures_prev
             }
             for item in evidence_rows if isinstance(item, dict) and isinstance(item.get('v501AiPipelineEvidence'), dict)
         ][:5],
-        'v501QualityNote': 'V507.04 records raw DeepSeek text, preserves self-consistent API numbers and symbolic expressions, requires zero unjustified case-specific repairs, and uses Excel only as external audit evidence.',
+        'v501QualityNote': 'V507.05 records raw DeepSeek text, preserves self-consistent API numbers and symbolic expressions, requires zero unjustified case-specific repairs, and uses Excel only as external audit evidence.',
         'uiDomProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('frontendDomRenderedOutputChecked')]),
         'uiResultBoxProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('uiResultBoxFound')]),
         'uiSolveButtonClickProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('uiSolveButtonClicked')]),
@@ -7210,9 +7210,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v507-04-excel-401-500-ui-proof',
+        'visibleResultContract': 'v507-05-short-final-report-parking',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v507-04-excel-401-500-ui-proof',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v507-05-short-final-report-parking',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -7313,7 +7313,7 @@ def _api_v50703_question_object_and_action(original_text: str) -> tuple[str, str
         # object only. Do not copy predicate/actors from the question into
         # phrases such as "всего лекарственных трав собрали школьники".
         obj = re.split(
-            r'\s+(?:вывели|посетили|отремонтировал|отремонтировала|забили|было|поступило|положили|плодоносит|сшили|купила|испекла|стояли|осталось|съели|сорвано|сгрыз|прилетело|продали|ушло|пошло|пришили|пришли|стало|собрали|получили|нашли|лежало|выросло|остались|оказалось|сделали|изготовили|решили|исписал|прочитала|прочитал|вынул|съедает|съедают)\b',
+            r'\s+(?:вывели|посетили|отремонтировал|отремонтировала|забили|было|поступило|положили|плодоносит|сшили|купила|испекла|стояли|осталось|съели|сорвано|сгрыз|прилетело|продали|ушло|пошло|пришили|пришли|стало|собрали|получили|нашли|лежало|выросло|остались|оказалось|сделали|изготовили|решили|исписал|прочитала|прочитал|вынул|съедает|съедают|приехало|приехали|приехал|приехала|приехало|приехали|приехал|приехала)\b',
             obj,
             maxsplit=1,
             flags=re.IGNORECASE,
@@ -7321,7 +7321,7 @@ def _api_v50703_question_object_and_action(original_text: str) -> tuple[str, str
         return obj
 
     patterns = [
-        r'сколько\s+(?:всего\s+)?(?P<object>.+?)\s+(?P<verb>вывели|посетили|отремонтировал|отремонтировала|забили|было|поступило|положили|плодоносит|сшили|купила|испекла|стояли|осталось|съели|сорвано|сгрыз|прилетело|продали|ушло|пошло|пришили|пришли|стало|собрали|получили|нашли|лежало|выросло|остались|оказалось|сделали|изготовили|решили|исписал|прочитала|прочитал|вынул|съедает|съедают)(?P<context>.*)$',
+        r'сколько\s+(?:всего\s+)?(?P<object>.+?)\s+(?P<verb>вывели|посетили|отремонтировал|отремонтировала|забили|было|поступило|положили|плодоносит|сшили|купила|испекла|стояли|осталось|съели|сорвано|сгрыз|прилетело|продали|ушло|пошло|пришили|пришли|стало|собрали|получили|нашли|лежало|выросло|остались|оказалось|сделали|изготовили|решили|исписал|прочитала|прочитал|вынул|съедает|съедают|приехало|приехали|приехал|приехала)(?P<context>.*)$',
         r'сколько\s+(?:всего\s+)?(?P<object>.+?)(?P<verb>\s+в\s+|\s+на\s+|\s+у\s+|\s+под\s+|\s+для\s+)(?P<context>.*)$',
     ]
     for pat in patterns:
@@ -7435,7 +7435,7 @@ def _api_v50704_concise_step_expl(original_text: str, step: str, expl: str, *, i
     expl_low = _api_v50703_norm(expl)
     word_count = len([w for w in re.split(r'\s+', expl_low) if w])
     bad_predicate = bool(
-        re.search(r'\b(?:если|было|была|был|были|осталось|остался|осталась|остались|купили|купила|привезли|продали|подарили|поставили|посадили|пришили|разложили|разместил|принесли|пошло|повесят|ввинтили|горело|работали|израсходовал|израсходовали|собрали|отдали|съедает|вынул|исписал)\b', expl_low)
+        re.search(r'\b(?:если|было|была|был|были|осталось|остался|осталась|остались|купили|купила|привезли|продали|подарили|поставили|посадили|пришили|разложили|разместил|принесли|пошло|повесят|ввинтили|горело|работали|израсходовал|израсходовали|собрали|отдали|съедает|вынул|исписал|приехало|приехали|приехал|приехала)\b', expl_low)
         or word_count > 4
         or re.search(r'\b(?:ему|ей|им|нам|вам|уже|на)$', expl_low)
     )
@@ -7472,6 +7472,8 @@ def _api_v50704_concise_step_expl(original_text: str, step: str, expl: str, *, i
             return _api_v50704_preserve_task_capitals(original_text, 'всего ' + obj)
         if bad_predicate and ('сколько всего' in qlow or 'съел' in qlow):
             return _api_v50704_preserve_task_capitals(original_text, 'всего ' + obj)
+        if bad_predicate and re.search(r'\bприехал', qlow):
+            return _api_v50704_preserve_task_capitals(original_text, 'всего ' + obj)
 
     return _api_v50704_preserve_task_capitals(original_text, expl)
 
@@ -7492,7 +7494,7 @@ def _api_v50704_template_evidence(original_text: str, rule: str) -> dict[str, An
     return {
         'templateFamily': 'excel_401_500_general_semantic_ui_proof',
         'operation': op,
-        'rule': rule or 'v50704_general_visible_ui_semantic_repair',
+        'rule': rule or 'v50705_general_visible_ui_semantic_repair',
         'confidence': 0.99,
         'usesExcelExpected': False,
         'caseSpecificRepair': False,
@@ -7641,7 +7643,7 @@ def _api_v50703_final_from_question(original_text: str, answer_number: int, curr
 
 
 def _api_v50703_excel_401_500_general_payload(original_text: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
-    """V507.04 route-layer semantic UI repair for the 401–500 Excel family.
+    """V507.05 route-layer semantic UI repair for the 401–500 Excel family.
 
     The repair is based on question grammar and the verified API arithmetic.  It
     fixes final-answer phrasing, dash explanations and unit tokens in the visible
@@ -7723,7 +7725,7 @@ def _api_v50703_excel_401_500_general_payload(original_text: str, payload: dict[
     visible = _api_v40208_visible_steps_text(fixed_steps, final)
     out = dict(payload)
     st = dict(structured or {})
-    rule_name = semantic_override or 'v50704_general_visible_ui_semantic_repair'
+    rule_name = semantic_override or 'v50705_general_visible_ui_semantic_repair'
     template_evidence = _api_v50704_template_evidence(original_text, rule_name)
     st.update({
         'steps': fixed_steps,
@@ -7760,11 +7762,11 @@ def _api_v50703_excel_401_500_general_payload(original_text: str, payload: dict[
         'v500TemplateEvidence': template_evidence,
         'v500UsesExcelExpected': False,
         'v500CaseSpecificRepair': False,
-        'v50704GeneralVisibleRepair': True,
+        'v50705GeneralVisibleRepair': True,
     })
     if evidence:
         evidence.setdefault('apiAnswerUsedAsPrimary', True)
-        evidence['v50704GeneralVisibleRepair'] = True
+        evidence['v50705GeneralVisibleRepair'] = True
         evidence['v500UsesExcelExpected'] = False
         evidence['v500CaseSpecificRepair'] = False
         evidence['v500TemplateEvidence'] = template_evidence
@@ -7773,7 +7775,7 @@ def _api_v50703_excel_401_500_general_payload(original_text: str, payload: dict[
             evidence['trustedApiNumberAfterFormatting'] = str(int(n))
             evidence['trustedApiNumberPreserved'] = True
         out['v501AiPipelineEvidence'] = evidence
-    marker = 'v507.04-excel-401-500-general-visible-repair'
+    marker = 'v507.05-excel-401-500-general-visible-repair'
     verifier = str(out.get('verifier') or '').strip()
     if marker not in verifier:
         out['verifier'] = verifier + ('; ' if verifier else '') + marker
@@ -7782,9 +7784,9 @@ def _api_v50703_excel_401_500_general_payload(original_text: str, payload: dict[
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     source = str(out.get('source') or '').strip()
     if source:
-        out['source'] = source + '; v50704-general-visible-repair'
+        out['source'] = source + '; v50705-general-visible-repair'
     else:
-        out['source'] = 'deepseek-primary; v50704-general-visible-repair'
+        out['source'] = 'deepseek-primary; v50705-general-visible-repair'
     return out
 
 
@@ -8564,7 +8566,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v507-04-excel-401-500-ui-proof'),
+        ('cacheBust', 'v507-05-short-final-report-parking'),
     ])
     return {
         **summary,
@@ -9257,34 +9259,15 @@ def _v50702_micro_final_report_payload(payload: dict[str, Any]) -> dict[str, Any
                 groups.append(item)
         micro['failureIssueGroups'] = groups
     micro['chatgptPlainJsonFragment'] = True
-    micro['fragmentPurpose'] = 'V507.04: decode the #json= fragment with URL decoding; it is plain compact JSON, not zlib.'
+    micro['fragmentPurpose'] = 'V507.05: decode the #json= fragment with URL decoding; it is plain compact JSON, not zlib.'
     return micro
 
 
 def _v50606_final_report_path_with_snapshot(run: dict[str, Any], run_id: str, key: str | None = None) -> str:
-    base_path = _browser_audit_final_report_path(run_id, key)
-    try:
-        payload = _v50702_compact_final_report_payload(run, str(key or LIVE_PRODUCTION_AUDIT_DEFAULT_KEY), run_id)
-        payload['selfContainedFinalReportUrl'] = True
-        payload['snapshotPurpose'] = 'V507.04: the ordinary final-report link carries redundant compact JSON snapshots in ?snapshot= and ?snapshot2=, plus a plain #json= fragment for ChatGPT when temporary run cache is not fetchable.'
-        token = _v50606_encode_final_report_snapshot(payload)
-        query_pairs: list[tuple[str, str]] = []
-        if token and len(token) <= 90000:
-            query_pairs.append(('snapshot', token))
-            # Duplicate the compressed token. If one opaque token is damaged while
-            # being copied through chat, the second one often remains recoverable.
-            query_pairs.append(('snapshot2', token))
-        path = base_path + (('?' + urlencode(query_pairs)) if query_pairs else '')
-        micro = _v50702_micro_final_report_payload(payload)
-        plain = json.dumps(micro, ensure_ascii=True, separators=(',', ':'), default=str)
-        # Keep the fragment below a conservative size. It is not sent to the server,
-        # but it remains visible in the copied link and is easy for ChatGPT to parse.
-        if len(plain) <= 75000:
-            path += '#json=' + quote(plain, safe='')
-        return path
-    except Exception:
-        pass
-    return base_path
+    # V507.05: keep the operator final-report link short again.
+    # The JSON is still present inside the HTML page and available through
+    # /final-report-json; do not append giant snapshot/snapshot2/#json tails.
+    return _browser_audit_final_report_path(run_id, key)
 
 
 def _browser_audit_label(payload: dict[str, Any]) -> tuple[str, str, str]:
@@ -9763,7 +9746,7 @@ def _browser_audit_operator_html(request: Request, payload: dict[str, Any], *, k
     technical_json = json.dumps(payload, ensure_ascii=False, indent=2)
     return f'''<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="robots" content="noindex"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V507.04 generalized symbolic/API UI-render live-аудит</title>
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V507.05 generalized symbolic/API UI-render live-аудит</title>
 <style>
 body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;margin:28px auto;padding:0 16px;line-height:1.45;background:#f8fafc;color:#111827}}
 .box{{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:20px;margin:16px 0;box-shadow:0 8px 22px rgba(15,23,42,.05)}}
@@ -9771,10 +9754,10 @@ body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;ma
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px}}.metric{{background:#f3f4f6;border-radius:14px;padding:12px}}.metric b{{display:block;font-size:24px}}
 .bar{{height:18px;background:#e5e7eb;border-radius:999px;overflow:hidden}}.fill{{height:100%;width:{pct}%;background:#111827}}input{{box-sizing:border-box;width:100%;border:1px solid #d1d5db;border-radius:12px;padding:12px;font:15px ui-monospace,Menlo,monospace;background:#fff}}.muted{{color:#6b7280}}pre{{white-space:pre-wrap;background:#111827;color:#f9fafb;padding:14px;border-radius:14px;overflow:auto;max-height:360px}}
 </style></head><body>
-<h1>V507.04 — generalized symbolic/API UI-render audit</h1>
+<h1>V507.05 — generalized symbolic/API UI-render audit</h1>
 <section class="box">
   <h2>1. Открыть реальную frontend-страницу аудита</h2>
-  <p>V507.04 проверяет generalized symbolic/API pipeline на Excel batch 301–400 через реальный production frontend: откроется self-hosted frontend /app, где будет одна кнопка «Запустить / продолжить аудит».</p>
+  <p>V507.05 проверяет generalized symbolic/API pipeline на Excel batch 301–400 через реальный production frontend: откроется self-hosted frontend /app, где будет одна кнопка «Запустить / продолжить аудит».</p>
   <p><a class="primary" href="{escape(frontend_url, quote=True)}">Открыть аудит на frontend</a></p>
   <p class="muted">На frontend-странице аудит вводит задания в реальное поле <code>#taskInput</code>, нажимает реальную кнопку <code>#solveBtn</code>, ждёт <code>#resultBox</code> и сверяет DOM с API/expected.</p>
   <input readonly value="{escape(frontend_url, quote=True)}" onclick="this.select()">
@@ -10065,7 +10048,7 @@ def _v50702_compact_final_report_payload(run: dict[str, Any], key_value: str, ru
         'dashboardMode': 'html-page-with-labeled-links-and-json-pre',
         'fullProofEmbedded': False,
         'fullProofLinkedOnly': True,
-        'reason': 'V507.04 restores the old final-report dashboard: labeled links first, compact JSON below, no giant embedded resultText/evidence payload.',
+        'reason': 'V507.05 restores the old final-report dashboard: labeled links first, compact JSON below, no giant embedded resultText/evidence payload.',
         'runId': run.get('runId'),
         'status': run.get('status'),
         'section': run.get('section'),
@@ -10347,7 +10330,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v507-04-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v507-05-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -10694,7 +10677,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v507-04-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v507-05-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:
