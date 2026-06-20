@@ -1,5 +1,5 @@
 (() => {
-  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v508_03_rollback_v50602_short_r";
+  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v509_01_rollback_v50103_first100";
   // src/i18n/ru.js
   var ru = {
     "app.name": "\u041C\u0430\u0442\u0435\u043C\u0430\u0442\u0438\u0447\u043A\u0430",
@@ -1062,7 +1062,7 @@
     DEFAULT_LANGUAGE: "ru",
     ENABLE_DEMO_FALLBACK: true
   };
-  var EXPECTED_BACKEND_RELEASE = "v508_03_rollback_v50602_short_r";
+  var EXPECTED_BACKEND_RELEASE = "v509_01_rollback_v50103_first100";
 
   // src/storage/installIdStorage.js
   var KEY5 = "matematichka_install_id";
@@ -9168,15 +9168,13 @@
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const normBase = (value) => String(value || "").trim().replace(/\/+$/g, "");
       const backendBase = normBase(params.get("backendBaseUrl") || params.get("backend") || REMOTE_EXPLAIN_PROXY_URL.replace(/\/api\/explain.*$/i, ""));
-      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v508_03_rollback_v50602_short_r");
-      const auditKey = String(params.get("auditKey") || params.get("key") || "v508-03-live-audit");
+      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v509_01_rollback_v50103_first100");
+      const auditKey = String(params.get("auditKey") || params.get("key") || "v509-01-live-audit");
       const auditSection = String(params.get("section") || params.get("auditSection") || "excel_numeric_regression");
-      const auditOffset = String(params.get("offset") || "300");
+      const auditOffset = String(params.get("offset") || "0");
       const auditLimit = String(params.get("limit") || "100");
       const auditAllowExternal = String(params.get("allowExternal") || "1");
       const auditMaxExternalCalls = String(params.get("maxExternalCalls") || "150");
-      const auditAutoStartRaw = String(params.get("autoStart") || params.get("autostart") || "1").toLowerCase();
-      const auditAutoStart = !["0", "false", "no", "manual", "off"].includes(auditAutoStartRaw);
       const releaseLabelMatch = String(release || "").match(/^v(\d+)(?:[_\.](\d+))?/i);
       const releaseLabel = releaseLabelMatch ? (`V${releaseLabelMatch[1]}${releaseLabelMatch[2] ? "." + releaseLabelMatch[2] : ""}`) : "AUDIT";
       const operatorTitle = `${releaseLabel} — Excel numeric regression UI-render audit`;
@@ -9197,11 +9195,11 @@
           <p id="auditStatus" class="muted">Готов.</p>
         </div>
         <div class="audit-actions">
-          <button id="auditStartBtn" type="button">Запустить / продолжить вручную</button>
+          <button id="auditStartBtn" type="button">Запустить / продолжить</button>
           <button id="auditCopyBtn" type="button" class="secondary-btn">Скопировать ссылку</button>
         </div>
         <div class="metrics" aria-label="Статистика аудита">
-          <div class="metric">completed <b id="auditCompleted">0/${auditLimit}</b></div>
+          <div class="metric">completed <b id="auditCompleted">0/100</b></div>
           <div class="metric">passed <b id="auditPassed">0</b></div>
           <div class="metric">failed <b id="auditFailed">0</b></div>
         </div>
@@ -9538,10 +9536,7 @@
         if (globalThis.__MATH_UI_AUDIT_CONTEXT__) globalThis.__MATH_UI_AUDIT_CONTEXT__.active = false;
         return { receipt, domResultText };
       }
-      let auditRunning = false;
       async function runAudit() {
-        if (auditRunning) return;
-        auditRunning = true;
         const btn = el("auditStartBtn");
         if (btn) btn.disabled = true;
         try {
@@ -9588,7 +9583,6 @@
           setStatus("ОШИБКА: " + message, "bad");
           log("error", { message });
         } finally {
-          auditRunning = false;
           if (btn) btn.disabled = false;
           if (el("auditCurrent")) el("auditCurrent").textContent = "—";
           if (globalThis.__MATH_UI_AUDIT_CONTEXT__) globalThis.__MATH_UI_AUDIT_CONTEXT__.active = false;
@@ -9606,18 +9600,12 @@
         try { await navigator.clipboard.writeText(url); setStatus("Ссылка скопирована", "ok"); }
         catch { el("auditFinalUrl")?.select(); setStatus("Скопируйте выделенную ссылку вручную", "run"); }
       });
-      log("ready", { backendBase, release, auditKey, auditSection, auditOffset, auditLimit, auditAutoStart, frontendBuild: window.__MATH_APP_BUILD__ || "" });
+      log("ready", { backendBase, release, auditKey, auditSection, auditOffset, auditLimit, frontendBuild: window.__MATH_APP_BUILD__ || "" });
       setTimeout(() => {
         router.go("solve");
         stateApi.setRoute("solve");
         view();
       }, 300);
-      if (auditAutoStart) {
-        setStatus("Автозапуск audit…", "run");
-        setTimeout(() => {
-          try { runAudit(); } catch (error) { setStatus("ОШИБКА автозапуска: " + String(error?.message || error), "bad"); }
-        }, 900);
-      }
     }
     installFrontendStandaloneUiAuditOperator();
 

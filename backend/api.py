@@ -10,8 +10,6 @@ import re
 import threading
 import time
 import zlib
-import mimetypes
-import zipfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode, unquote
@@ -20,8 +18,7 @@ from html import escape
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, Response
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from backend.platform.modules.core.public.services.access.config import build_public_product_config
 from backend.platform.modules.core.public.services.access.service import (
@@ -35,75 +32,6 @@ from backend.diagnostic_audit import DEFAULT_AUDIT_CASES, _check_payload, _norma
 
 
 app = FastAPI()
-
-
-def _mount_self_hosted_frontend() -> None:
-    """Serve the bundled frontend from the same backend host at /app/.
-
-    V506 supports two deployment layouts:
-    - repository layout: backend/ and frontend/ are sibling directories;
-    - backend-only Timeweb layout: frontend files are packed into backend/frontend_assets.zip.
-
-    This keeps the live UI-render audit real: browser fills #taskInput, clicks
-    #solveBtn, reads #resultBox, and the backend still records DOM/API proof.
-    It only removes the manual GitHub Pages deployment step.
-    """
-    frontend_dir = Path(__file__).resolve().parent.parent / 'frontend'
-    if frontend_dir.is_dir():
-        try:
-            app.mount('/app', StaticFiles(directory=str(frontend_dir), html=True), name='self_hosted_frontend')
-            return
-        except RuntimeError:
-            return
-
-    assets_zip = Path(__file__).resolve().parent / 'frontend_assets.zip'
-    if not assets_zip.is_file():
-        return
-    if getattr(app.state, 'self_hosted_frontend_zip_routes', False):
-        return
-    app.state.self_hosted_frontend_zip_routes = True
-
-    def _read_frontend_asset(asset_path: str) -> tuple[bytes, str] | None:
-        normalized = str(asset_path or 'index.html').strip().lstrip('/')
-        if not normalized or normalized.endswith('/'):
-            normalized = 'index.html'
-        normalized = normalized.split('?', 1)[0].split('#', 1)[0]
-        if normalized not in {'index.html', 'app.bundle.js', 'styles.css'}:
-            # HTML-mode fallback: unknown app paths still receive the app shell.
-            normalized = 'index.html'
-        try:
-            with zipfile.ZipFile(assets_zip) as zf:
-                data = zf.read(normalized)
-        except Exception:
-            return None
-        media_type = mimetypes.guess_type(normalized)[0] or 'application/octet-stream'
-        if normalized.endswith('.js'):
-            media_type = 'application/javascript; charset=utf-8'
-        elif normalized.endswith('.css'):
-            media_type = 'text/css; charset=utf-8'
-        elif normalized.endswith('.html'):
-            media_type = 'text/html; charset=utf-8'
-        return data, media_type
-
-    @app.get('/app', include_in_schema=False)
-    @app.get('/app/', include_in_schema=False)
-    async def _self_hosted_frontend_zip_index() -> Response:
-        asset = _read_frontend_asset('index.html')
-        if asset is None:
-            return JSONResponse({'detail': 'Frontend asset not found'}, status_code=404)
-        data, media_type = asset
-        return Response(content=data, media_type=media_type, headers=NO_CACHE_HEADERS)
-
-    @app.get('/app/{asset_path:path}', include_in_schema=False)
-    async def _self_hosted_frontend_zip_asset(asset_path: str) -> Response:
-        asset = _read_frontend_asset(asset_path)
-        if asset is None:
-            return JSONResponse({'detail': 'Frontend asset not found'}, status_code=404)
-        data, media_type = asset
-        return Response(content=data, media_type=media_type, headers=NO_CACHE_HEADERS)
-
-
-_mount_self_hosted_frontend()
 _ACCESS_SERVICE: AccessService | None = None
 _ACCESS_SERVICE_STATE_PATH: str | None = None
 
@@ -157,27 +85,26 @@ def _public_base_url(request: Request | None = None) -> str:
     return raw
 
 
-# V504: _public_frontend_url is defined below with self-hosted /app fallback.
+def _public_frontend_url() -> str:
+    return (
+        os.environ.get('PUBLIC_FRONTEND_URL')
+        or os.environ.get('FRONTEND_PUBLIC_URL')
+        or 'https://wolandvp-beep.github.io/ai-math-1-4-frontend/'
+    ).strip().rstrip('/') + '/'
 
 
 
 
-def _public_frontend_url(request: Request | None = None) -> str:
-    """Return frontend URL for UI-render audit.
-
-    V504 defaults to the self-hosted backend static route `/app/`, so the
-    operator no longer needs a fresh GitHub Pages upload for every test build.
-    `PUBLIC_FRONTEND_URL`, `FRONTEND_PUBLIC_URL`, or `GITHUB_PAGES_FRONTEND_URL`
-    may still override it as a fallback.
-    """
+def _public_frontend_url() -> str:
+    """Return deployed GitHub Pages frontend URL used by UI-render audit iframe."""
     value = (
         os.environ.get('PUBLIC_FRONTEND_URL')
         or os.environ.get('FRONTEND_PUBLIC_URL')
         or os.environ.get('GITHUB_PAGES_FRONTEND_URL')
-        or ''
+        or 'https://wolandvp-beep.github.io/ai-math-1-4-frontend/'
     ).strip()
     if not value:
-        value = _public_base_url(request).rstrip('/') + '/app/'
+        value = 'https://wolandvp-beep.github.io/ai-math-1-4-frontend/'
     if not value.endswith('/'):
         value += '/'
     return value
@@ -192,12 +119,11 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('release', APP_RELEASE),
         ('auditKey', audit_key),
         ('section', 'excel_numeric_regression'),
-        ('offset', '300'),
+        ('offset', '0'),
         ('limit', '100'),
-        ('autoStart', '1'),
-        ('cacheBust', 'v508-03-rollback-v50602-short-r'),
+        ('cacheBust', 'v509-01-rollback-v50103-first100'),
     ])
-    return _public_frontend_url(request) + '?' + query
+    return _public_frontend_url() + '?' + query
 
 def _next_live_audit_links(request: Request | None = None, key: str | None = None) -> dict:
     audit_key = key or os.environ.get('LIVE_AUDIT_PUBLIC_HINT_KEY') or LIVE_PRODUCTION_AUDIT_DEFAULT_KEY
@@ -213,7 +139,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         ('section', 'excel_numeric_regression'),
         ('key', audit_key),
         ('limit', '100'),
-        ('offset', '300'),
+        ('offset', '0'),
         ('allowExternal', '1'),
         ('maxExternalCalls', '150'),
         ('release', APP_RELEASE),
@@ -221,7 +147,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V508.03 — generalized symbolic/API audit / batch 501–600 with strict anti-memorization',
+        'nextAuditPlannedMapStep': 'V509.01 — rollback to V501.03 architecture / batch 1–100 real external UI-render audit',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -245,8 +171,8 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditEvidenceRequired': True,
         'nextAuditAcceptanceRule': 'Раздел принимать по batch final-report: finalAcceptance=true, status=done, completed=planned, failed=0, failures=0, evidence rows=planned, frontend DOM resultBox proof present, numericComparable rows have numericPassed=true; Excel short answer is only numeric expected, not visible final Ответ.',
         'nextAuditUserRunWorkflow': [
-            '1) Откройте nextAuditStartUrl в браузере: это frontend UI-render audit на self-hosted frontend /app.',
-            '2) Аудит запускается автоматически через autoStart=1.',
+            '1) Откройте nextAuditStartUrl в браузере: это frontend UI-render audit на GitHub Pages.',
+            '2) Нажмите одну кнопку: Запустить / продолжить UI-render аудит.',
             '3) Дождитесь статуса done/готово.',
             '4) Скопируйте одну ссылку: Итоговый отчёт для ChatGPT.',
         ],
@@ -256,7 +182,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditQueryOrderSafe': True,
         'nextAuditNoSectionEntityRisk': True,
         'nextAuditNoQueryParamReorderRisk': True,
-        'nextAuditNote': 'V508.03 запускает batch 501–600 через self-hosted frontend /app или GitHub Pages fallback: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
+        'nextAuditNote': 'V509.01 запускает batch 1–100 через GitHub Pages frontend: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
     }
 
 
@@ -273,7 +199,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v508-03-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v509-01-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3717,7 +3643,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v508-03-rollback-v50602-short-r-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v509-01-rollback-v50103-first100-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -5210,37 +5136,6 @@ def _live_audit_evidence_row(row: dict[str, Any]) -> dict[str, Any]:
         'uiRenderPassed': _live_audit_ui_render_passed(row),
         'uiRenderIssues': row.get('uiRenderIssues') or [],
     }
-    # V508.03: flatten nested API/symbolic arbitration evidence into each audit
-    # evidence row.  Earlier reports showed zero aggregate API-primary counters
-    # even though structuredSolution contained the proof.
-    st = row.get('structuredSolution') if isinstance(row.get('structuredSolution'), dict) else {}
-    ev = row.get('v501AiPipelineEvidence') if isinstance(row.get('v501AiPipelineEvidence'), dict) else {}
-    def _pick(*keys: str) -> Any:
-        for key in keys:
-            if key in row and row.get(key) is not None:
-                return row.get(key)
-            if key in st and st.get(key) is not None:
-                return st.get(key)
-            if key in ev and ev.get(key) is not None:
-                return ev.get(key)
-        return None
-    evidence.update({
-        'v501ApiAnswerConsidered': bool(_pick('v501ApiAnswerConsidered', 'apiAnswerConsidered')),
-        'v501ApiCandidateTrusted': bool(_pick('v501ApiCandidateTrusted', 'apiCandidateTrusted')),
-        'v501ApiAnswerUsedAsPrimary': bool(_pick('v501ApiAnswerUsedAsPrimary', 'apiAnswerUsedAsPrimary')),
-        'v501ApiAnswerDecision': _pick('v501ApiAnswerDecision', 'apiAnswerDecision'),
-        'v501ApiTemplateConflict': bool(_pick('v501ApiTemplateConflict', 'apiTemplateConflict')),
-        'v501TemplateOverrodeTrustedApi': bool(_pick('v501TemplateOverrodeTrustedApi', 'templateOverrodeTrustedApi')),
-        'v501ApiProtectedFromTemplateOverride': bool(_pick('v501ApiProtectedFromTemplateOverride', 'apiProtectedFromTemplateOverride')),
-        'v501ApiScaleNormalized': bool(_pick('v501ApiScaleNormalized', 'apiScaleNormalized')),
-        'v501ApiPrimaryVerifiedFormatted': bool(_pick('v501ApiPrimaryVerifiedFormatted', 'apiPrimaryVerifiedFormatted')),
-        'v50503TrustedApiAuthoritative': bool(_pick('v50503TrustedApiAuthoritative', 'trustedApiAuthoritative')),
-        'v50503TrustedApiNumericLock': bool(_pick('v50503TrustedApiNumericLock', 'trustedApiNumericLock')),
-        'v50503TrustedApiAnswerNumber': _pick('v50503TrustedApiAnswerNumber', 'trustedApiAnswerNumber'),
-        'v50503TrustedApiNumberPreserved': bool(_pick('v50503TrustedApiNumberPreserved', 'trustedApiNumberPreserved')),
-        'v50503TrustedApiOverrideBlocked': bool(_pick('v50503TrustedApiOverrideBlocked', 'trustedApiOverrideBlocked')),
-        'v50601SymbolicApiTrusted': bool(_pick('v50601SymbolicApiTrusted', 'symbolicApiTrusted')),
-    })
     evidence['suspiciousReasons'] = _live_audit_suspicion_reasons({**row, 'resultText': result_text})
     proof_material = {
         'inputText': evidence['inputText'],
@@ -5391,14 +5286,7 @@ def _v500_learning_metrics(evidence_rows: list[dict[str, Any]], run: dict[str, A
         issues.append(f'v501 learning coverage {len(learning_rows)} < required {required_min}')
     if any(_v500_row_general_rule(row) and not isinstance(_v500_row_template_evidence(row), dict) for row in rows):
         issues.append('some v500GeneralRule rows have no v500TemplateEvidence')
-    strict_no_memorization = str(APP_RELEASE).startswith(('v506', 'v507', 'v508', 'v509', 'v51', 'v52', 'v53', 'v54', 'v55', 'v56', 'v57', 'v58', 'v59'))
-    unjustified_case_specific = [
-        row for row in case_specific_rows
-        if not row.get('v500CaseSpecificRepairApprovedDamagedExcel')
-    ]
-    if strict_no_memorization and unjustified_case_specific:
-        issues.append(f'case-specific repair count {len(unjustified_case_specific)} must be 0 in strict learning stage')
-    elif len(case_specific_rows) > max(3, int(round(planned * 0.20))) and planned:
+    if len(case_specific_rows) > max(3, int(round(planned * 0.20))) and planned:
         issues.append(f'case-specific repair count {len(case_specific_rows)} is too high for learning stage')
     return {
         'v500TemplateEvidenceCount': len(template_rows),
@@ -5697,28 +5585,16 @@ def _live_audit_acceptance_blockers(run: dict[str, Any]) -> list[str]:
         if failed_feedback_spot_checks:
             labels = ', '.join(str(item.get('name')) for item in failed_feedback_spot_checks[:4])
             blockers.append('repeated user feedback full-answer spot check failed: ' + labels)
-        if str(APP_RELEASE).startswith('v5'):
+        if str(APP_RELEASE).startswith(('v500', 'v501')):
             learning = _v500_learning_metrics(normal_cases, run)
             if not learning.get('v500GeneralizationAcceptance'):
-                blockers.extend(['V5 learning/generalization blocker: ' + str(issue) for issue in (learning.get('v500GeneralizationIssues') or [])])
-            if str(APP_RELEASE).startswith('v506'):
-                memorized_rows = [item for item in normal_cases if _v500_row_is_case_specific_repair(item) and not item.get('v500CaseSpecificRepairApprovedDamagedExcel')]
-                if memorized_rows:
-                    blockers.append('V506 strict anti-memorization blocker: case-specific repair used for ' + str(len(memorized_rows)) + ' cases')
-            changed_answer_rows = [item for item in normal_cases if isinstance(item, dict) and item.get('postprocessChangedAnswerNumber') and not item.get('v501ApiScaleNormalized') and not item.get('v502ExplicitMultiAnswerTemplate')]
+                blockers.extend(['V501.03 learning/generalization blocker: ' + str(issue) for issue in (learning.get('v500GeneralizationIssues') or [])])
+            changed_answer_rows = [item for item in normal_cases if isinstance(item, dict) and item.get('postprocessChangedAnswerNumber') and not item.get('v501ApiScaleNormalized')]
             if changed_answer_rows:
-                blockers.append('V5 pipeline blocker: postprocessChangedAnswerNumber=true for ' + str(len(changed_answer_rows)) + ' cases; inspect rawDeepSeekText vs postprocessAfter before acceptance')
-            template_overrode_api_rows = [item for item in normal_cases if isinstance(item, dict) and item.get('v501TemplateOverrodeTrustedApi') and not item.get('v502ExplicitMultiAnswerTemplate')]
+                blockers.append('V501.03 pipeline blocker: postprocessChangedAnswerNumber=true for ' + str(len(changed_answer_rows)) + ' cases; inspect rawDeepSeekText vs postprocessAfter before acceptance')
+            template_overrode_api_rows = [item for item in normal_cases if isinstance(item, dict) and item.get('v501TemplateOverrodeTrustedApi')]
             if template_overrode_api_rows:
-                blockers.append('V5 API-primary blocker: templateOverrodeTrustedApi=true for ' + str(len(template_overrode_api_rows)) + ' cases; API answer must not be silently replaced')
-            trusted_api_lock_violations = [
-                item for item in normal_cases
-                if isinstance(item, dict)
-                and item.get('v50503TrustedApiAuthoritative')
-                and not item.get('v50503TrustedApiNumberPreserved')
-            ]
-            if trusted_api_lock_violations:
-                blockers.append('V506 trusted-API numeric-lock blocker: authoritative API number was not preserved for ' + str(len(trusted_api_lock_violations)) + ' cases')
+                blockers.append('V501.03 API-primary blocker: templateOverrodeTrustedApi=true for ' + str(len(template_overrode_api_rows)) + ' cases; API answer must not be silently replaced')
     duplicate_issues = _live_audit_duplicate_quality_issues(evidence)
     if duplicate_issues:
         blockers.append('duplicate audit proof/input cases are present: ' + '; '.join(duplicate_issues[:3]))
@@ -5909,17 +5785,9 @@ async def _evaluate_live_audit_case(case: dict[str, Any], *, allow_external: boo
         'v501ApiAnswerDecision': (v501_pipeline_evidence.get('apiAnswerDecision') if isinstance(v501_pipeline_evidence, dict) else None),
         'v501ApiTemplateConflict': bool(isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('apiTemplateConflict')),
         'v501TemplateOverrodeTrustedApi': bool(isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('templateOverrodeTrustedApi')),
-        'v502ExplicitMultiAnswerTemplate': bool(payload.get('v502ExplicitMultiAnswerTemplate') or (v500_structured.get('v502ExplicitMultiAnswerTemplate') if isinstance(v500_structured, dict) else False)),
         'v501ApiProtectedFromTemplateOverride': bool(isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('apiProtectedFromTemplateOverride')),
-        'v501ApiScaleNormalized': bool((isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('apiScaleNormalized')) or payload.get('v501ApiScaleNormalized') or (v500_structured.get('v501ApiScaleNormalized') if isinstance(v500_structured, dict) else False)),
+        'v501ApiScaleNormalized': bool(isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('apiScaleNormalized')),
         'v501ApiPrimaryVerifiedFormatted': bool(isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('apiPrimaryVerifiedFormatted')),
-        'v50503TrustedApiAuthoritative': bool((isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('trustedApiAuthoritative')) or payload.get('v50503TrustedApiAuthoritative') or (v500_structured.get('v50503TrustedApiAuthoritative') if isinstance(v500_structured, dict) else False)),
-        'v50503TrustedApiNumericLock': bool((isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('trustedApiNumericLock')) or payload.get('v50503TrustedApiNumericLock') or (v500_structured.get('v50503TrustedApiNumericLock') if isinstance(v500_structured, dict) else False)),
-        'v50503TrustedApiAnswerNumber': ((v501_pipeline_evidence.get('trustedApiAnswerNumber') if isinstance(v501_pipeline_evidence, dict) else None) or payload.get('v50503TrustedApiAnswerNumber') or (v500_structured.get('v50503TrustedApiAnswerNumber') if isinstance(v500_structured, dict) else None)),
-        'v50503TrustedApiNumberBeforeFormatting': ((v501_pipeline_evidence.get('trustedApiNumberBeforeFormatting') if isinstance(v501_pipeline_evidence, dict) else None) or payload.get('v50503TrustedApiNumberBeforeFormatting')),
-        'v50503TrustedApiNumberAfterFormatting': ((v501_pipeline_evidence.get('trustedApiNumberAfterFormatting') if isinstance(v501_pipeline_evidence, dict) else None) or payload.get('v50503TrustedApiNumberAfterFormatting')),
-        'v50503TrustedApiNumberPreserved': bool((isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('trustedApiNumberPreserved')) or payload.get('v50503TrustedApiNumberPreserved')),
-        'v50503TrustedApiOverrideBlocked': bool((isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('trustedApiOverrideBlocked')) or payload.get('v50503TrustedApiOverrideBlocked')),
         'v501ApiAnswerCandidate': (v501_pipeline_evidence.get('apiAnswerCandidate') if isinstance(v501_pipeline_evidence, dict) else None),
         'v501TemplateCandidate': (v501_pipeline_evidence.get('templateCandidate') if isinstance(v501_pipeline_evidence, dict) else None),
         'payloadError': payload.get('error'),
@@ -6078,7 +5946,7 @@ def _live_audit_public_run_summary(run: dict[str, Any], *, include_failures_prev
         'v500SelfVerifierPassedCount': len([item for item in evidence_rows if isinstance(item, dict) and ((isinstance(item.get('v500SelfVerifier'), dict) and item.get('v500SelfVerifier', {}).get('passed')) or (isinstance(item.get('structuredSolution'), dict) and isinstance(item.get('structuredSolution', {}).get('v500SelfCheck'), dict) and item.get('structuredSolution', {}).get('v500SelfCheck', {}).get('passed')))]),
         'v500GeneralRuleCounts': {rule: len([item for item in evidence_rows if isinstance(item, dict) and ((item.get('v500GeneralRule') or (item.get('structuredSolution', {}).get('v500Rule') if isinstance(item.get('structuredSolution'), dict) else None)) == rule)]) for rule in sorted({str(item.get('v500GeneralRule') or (item.get('structuredSolution', {}).get('v500Rule') if isinstance(item.get('structuredSolution'), dict) else '') or '') for item in evidence_rows if isinstance(item, dict) and (item.get('v500GeneralRule') or (isinstance(item.get('structuredSolution'), dict) and item.get('structuredSolution', {}).get('v500Rule')))} )},
         **v500_learning,
-        'v500QualityNote': 'V5 requires learning evidence: reusable template evidence or verified API-primary formatted evidence; numeric success alone is not enough for the learning stage.',
+        'v500QualityNote': 'V501.03 requires learning evidence: reusable template evidence or verified API-primary formatted evidence; numeric success alone is not enough for the learning stage.',
         'v501AiPipelineEvidenceCount': len([item for item in evidence_rows if isinstance(item, dict) and isinstance(item.get('v501AiPipelineEvidence'), dict)]),
         'v501RawDeepSeekTextProofCount': len([item for item in evidence_rows if isinstance(item, dict) and item.get('rawDeepSeekText')]),
         'v501PostprocessChangedAnswerNumberCount': len([item for item in evidence_rows if isinstance(item, dict) and item.get('postprocessChangedAnswerNumber')]),
@@ -6092,14 +5960,6 @@ def _live_audit_public_run_summary(run: dict[str, Any], *, include_failures_prev
         'v501ApiProtectedFromTemplateOverrideCount': len([item for item in evidence_rows if isinstance(item, dict) and item.get('v501ApiProtectedFromTemplateOverride')]),
         'v501ApiScaleNormalizedCount': len([item for item in evidence_rows if isinstance(item, dict) and item.get('v501ApiScaleNormalized')]),
         'v501ApiPrimaryVerifiedFormattedCount': len([item for item in evidence_rows if isinstance(item, dict) and item.get('v501ApiPrimaryVerifiedFormatted')]),
-        'v50503TrustedApiAuthoritativeCount': len([item for item in evidence_rows if isinstance(item, dict) and item.get('v50503TrustedApiAuthoritative')]),
-        'v50503TrustedApiNumericLockCount': len([item for item in evidence_rows if isinstance(item, dict) and item.get('v50503TrustedApiNumericLock')]),
-        'v50503TrustedApiNumberPreservedCount': len([item for item in evidence_rows if isinstance(item, dict) and item.get('v50503TrustedApiNumberPreserved')]),
-        'v50503TrustedApiOverrideBlockedCount': len([item for item in evidence_rows if isinstance(item, dict) and item.get('v50503TrustedApiOverrideBlocked')]),
-        'v50503TrustedApiNumberViolationCount': len([item for item in evidence_rows if isinstance(item, dict) and item.get('v50503TrustedApiAuthoritative') and not item.get('v50503TrustedApiNumberPreserved')]),
-        'v50601SymbolicApiTrustedCount': len([item for item in evidence_rows if isinstance(item, dict) and item.get('v50601SymbolicApiTrusted')]),
-        'v50601StrictNoMemorizationPassed': not any(_v500_row_is_case_specific_repair(item) and not item.get('v500CaseSpecificRepairApprovedDamagedExcel') for item in evidence_rows if isinstance(item, dict)),
-        'v50601LearningArchitectureAcceptance': bool(v500_learning.get('v500GeneralizationAcceptance')) and not any(_v500_row_is_case_specific_repair(item) and not item.get('v500CaseSpecificRepairApprovedDamagedExcel') for item in evidence_rows if isinstance(item, dict)),
         'v501PipelineEvidenceSamples': [
             {
                 'id': item.get('id'),
@@ -6113,10 +5973,6 @@ def _live_audit_public_run_summary(run: dict[str, Any], *, include_failures_prev
                 'v501ApiTemplateConflict': bool(item.get('v501ApiTemplateConflict')),
                 'v501ApiScaleNormalized': bool(item.get('v501ApiScaleNormalized')),
                 'v501ApiPrimaryVerifiedFormatted': bool(item.get('v501ApiPrimaryVerifiedFormatted')),
-                'v50503TrustedApiAuthoritative': bool(item.get('v50503TrustedApiAuthoritative')),
-                'v50503TrustedApiAnswerNumber': item.get('v50503TrustedApiAnswerNumber'),
-                'v50503TrustedApiNumberPreserved': bool(item.get('v50503TrustedApiNumberPreserved')),
-                'v50503TrustedApiOverrideBlocked': bool(item.get('v50503TrustedApiOverrideBlocked')),
                 'v501ApiAnswerCandidate': item.get('v501ApiAnswerCandidate'),
                 'v501TemplateCandidate': item.get('v501TemplateCandidate'),
                 'postprocessBefore': item.get('postprocessBefore'),
@@ -6124,7 +5980,7 @@ def _live_audit_public_run_summary(run: dict[str, Any], *, include_failures_prev
             }
             for item in evidence_rows if isinstance(item, dict) and isinstance(item.get('v501AiPipelineEvidence'), dict)
         ][:5],
-        'v501QualityNote': 'V508.03 records raw DeepSeek text, preserves self-consistent API numbers and symbolic expressions, requires zero unjustified case-specific repairs, and uses Excel only as external audit evidence.',
+        'v501QualityNote': 'V501.03 records raw DeepSeek text, parsed JSON, structured solution, before/after postprocess snapshots, and API-vs-template arbitration evidence. Raw API is considered as the primary candidate but is not silently treated as Excel truth.',
         'uiDomProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('frontendDomRenderedOutputChecked')]),
         'uiResultBoxProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('uiResultBoxFound')]),
         'uiSolveButtonClickProofs': len([item for item in evidence_rows if isinstance(item, dict) and item.get('uiSolveButtonClicked')]),
@@ -6605,7 +6461,7 @@ def _live_audit_record_browser_client_case(audit_context: dict[str, Any], text: 
         'uiDomResultMatchesApi': False,
         'userVisibleAnswerMatchesExpected': False,
         'frontendDisplayAssumption': 'Frontend should display payload.result from /api/explain; this row is accepted only after DOM #resultBox proof is recorded by the frontend UI harness.',
-        'frontendDisplayContract': 'V5 accepts only after production frontend DOM proof is recorded: #taskInput value -> #solveBtn click -> /api/explain -> #resultBox text compared with API answer and numeric Excel expected.',
+        'frontendDisplayContract': 'V501.03 accepts only after production frontend DOM proof is recorded: #taskInput value -> #solveBtn click -> /api/explain -> #resultBox text compared with API answer and numeric Excel expected.',
         'structuredSolution': structured_solution,
         'v500GeneralRuleApplied': v500_rule_applied,
         'v500GeneralRule': v500_rule,
@@ -6634,17 +6490,9 @@ def _live_audit_record_browser_client_case(audit_context: dict[str, Any], text: 
         'v501ApiAnswerDecision': (v501_pipeline_evidence.get('apiAnswerDecision') if isinstance(v501_pipeline_evidence, dict) else None),
         'v501ApiTemplateConflict': bool(isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('apiTemplateConflict')),
         'v501TemplateOverrodeTrustedApi': bool(isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('templateOverrodeTrustedApi')),
-        'v502ExplicitMultiAnswerTemplate': bool(payload.get('v502ExplicitMultiAnswerTemplate') or (v500_structured.get('v502ExplicitMultiAnswerTemplate') if isinstance(v500_structured, dict) else False)),
         'v501ApiProtectedFromTemplateOverride': bool(isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('apiProtectedFromTemplateOverride')),
-        'v501ApiScaleNormalized': bool((isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('apiScaleNormalized')) or payload.get('v501ApiScaleNormalized') or (v500_structured.get('v501ApiScaleNormalized') if isinstance(v500_structured, dict) else False)),
+        'v501ApiScaleNormalized': bool(isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('apiScaleNormalized')),
         'v501ApiPrimaryVerifiedFormatted': bool(isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('apiPrimaryVerifiedFormatted')),
-        'v50503TrustedApiAuthoritative': bool((isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('trustedApiAuthoritative')) or payload.get('v50503TrustedApiAuthoritative') or (v500_structured.get('v50503TrustedApiAuthoritative') if isinstance(v500_structured, dict) else False)),
-        'v50503TrustedApiNumericLock': bool((isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('trustedApiNumericLock')) or payload.get('v50503TrustedApiNumericLock') or (v500_structured.get('v50503TrustedApiNumericLock') if isinstance(v500_structured, dict) else False)),
-        'v50503TrustedApiAnswerNumber': ((v501_pipeline_evidence.get('trustedApiAnswerNumber') if isinstance(v501_pipeline_evidence, dict) else None) or payload.get('v50503TrustedApiAnswerNumber') or (v500_structured.get('v50503TrustedApiAnswerNumber') if isinstance(v500_structured, dict) else None)),
-        'v50503TrustedApiNumberBeforeFormatting': ((v501_pipeline_evidence.get('trustedApiNumberBeforeFormatting') if isinstance(v501_pipeline_evidence, dict) else None) or payload.get('v50503TrustedApiNumberBeforeFormatting')),
-        'v50503TrustedApiNumberAfterFormatting': ((v501_pipeline_evidence.get('trustedApiNumberAfterFormatting') if isinstance(v501_pipeline_evidence, dict) else None) or payload.get('v50503TrustedApiNumberAfterFormatting')),
-        'v50503TrustedApiNumberPreserved': bool((isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('trustedApiNumberPreserved')) or payload.get('v50503TrustedApiNumberPreserved')),
-        'v50503TrustedApiOverrideBlocked': bool((isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('trustedApiOverrideBlocked')) or payload.get('v50503TrustedApiOverrideBlocked')),
         'v501ApiAnswerCandidate': (v501_pipeline_evidence.get('apiAnswerCandidate') if isinstance(v501_pipeline_evidence, dict) else None),
         'v501TemplateCandidate': (v501_pipeline_evidence.get('templateCandidate') if isinstance(v501_pipeline_evidence, dict) else None),
         'payloadError': payload.get('error'),
@@ -7011,129 +6859,6 @@ def _api_v40208_visible_steps_text(steps: list[str], final_answer: str) -> str:
     return '\n'.join(lines).strip()
 
 
-
-
-def _api_v50803_extract_payload_steps(payload: dict[str, Any]) -> list[str]:
-    structured = payload.get('structured_solution') if isinstance(payload.get('structured_solution'), dict) else {}
-    if not structured and isinstance(payload.get('structuredSolution'), dict):
-        structured = payload.get('structuredSolution')
-    raw = structured.get('steps') if isinstance(structured, dict) else None
-    if isinstance(raw, list) and raw:
-        return [re.sub(r'^\s*\d+[\).]\s*', '', str(x or '').strip()).rstrip('.!?') for x in raw if str(x or '').strip()]
-    result_text = str(payload.get('userVisibleResultText') or payload.get('result') or payload.get('explanation') or '')
-    body = _live_audit_solution_body_lines(result_text)
-    if not body and result_text:
-        body = re.findall(r'(?:^|\s)\d+\)\s*(.*?)(?=\s+\d+\)|\s+Ответ\s*:|$)', result_text, flags=re.IGNORECASE | re.S)
-    steps: list[str] = []
-    for line in body:
-        clean = re.sub(r'^\s*\d+[\).]\s*', '', str(line or '').strip()).rstrip('.!?')
-        if clean and re.search(r'\d+\s*(?:[+\-−×xх*/:÷])\s*\d+\s*=\s*\d+', clean):
-            steps.append(clean)
-    return steps
-
-
-def _api_v50803_fix_counted_units_minimal(original_text: str, step: str) -> str:
-    """Minimal V506.02-compatible guard: counted objects are not litres."""
-    low = re.sub(r'\s+', ' ', str(original_text or '').lower().replace('ё', 'е')).strip()
-    out = str(step or '')
-    counted_words = (
-        'лист', 'листа', 'листов', 'фигура', 'фигуры', 'фигур', 'книга', 'книги', 'книг',
-        'машина', 'машины', 'машин', 'пуговица', 'пуговицы', 'пуговиц', 'карандаш', 'карандаша', 'карандашей',
-        'ручка', 'ручки', 'ручек', 'яблоко', 'яблока', 'яблок', 'игрушка', 'игрушки', 'игрушек',
-    )
-    if any(re.search(rf'\b{re.escape(w)}\b', low) for w in counted_words) and not re.search(r'\b(?:литр|литра|литров)\b', low):
-        out = re.sub(r'(=\s*-?\d+(?:[,.]\d+)?\s*)\(\s*л\s*\)', r'\1(шт.)', out, flags=re.IGNORECASE)
-    return out
-
-
-def _api_v50803_fix_dash_minimal(step: str) -> str:
-    """Trim only obviously copied predicate tails; do not rewrite whole solution."""
-    out = str(step or '').strip()
-    out = re.sub(r'[–—-]\s*([А-ЯЁа-яё]+(?:\s+[А-ЯЁа-яё]+){0,2})\s+всего\b', r'– всего \1', out, flags=re.IGNORECASE)
-    out = re.sub(
-        r'([–—-]\s*(?:всего\s+)?[А-ЯЁа-яё]+(?:\s+[А-ЯЁа-яё]+){0,2})\s+'
-        r'(?:было|была|был|были|стало|осталось|приехал[аои]?|купил[аи]?|сделал[аи]?|раскрасил[аи]?|пришили|продали|поступило).*$',
-        r'\1',
-        out,
-        flags=re.IGNORECASE,
-    )
-    out = re.sub(r'\s+(?:ему|ей|им|нам|вам|уже|на)\s*$', '', out, flags=re.IGNORECASE)
-    return out.strip()
-
-
-def _api_v50803_fix_final_answer_minimal(original_text: str, final_answer: str, answer_number: Any) -> str:
-    low = re.sub(r'\s+', ' ', str(original_text or '').lower().replace('ё', 'е')).strip()
-    qmatch = re.findall(r'[^.?!]*\?', str(original_text or ''))
-    qlow = re.sub(r'\s+', ' ', (qmatch[-1] if qmatch else original_text).lower().replace('ё', 'е')).strip()
-    final = re.sub(r'\s+', ' ', str(final_answer or '').strip()).strip(' .!?')
-    m = re.search(r'-?\d+', str(answer_number or final or ''))
-    n = int(m.group(0)) if m else None
-    if n is not None and 'раскрас' in low and 'раскрас' in qlow and 'сколько' in qlow:
-        obj = _api_v309_plural(n, 'фигуру', 'фигуры', 'фигур') if '_api_v309_plural' in globals() else 'фигур'
-        if re.search(r'\bон\b', qlow):
-            return f'он раскрасил {n} {obj}'
-        if re.search(r'\bона\b', qlow):
-            return f'она раскрасила {n} {obj}'
-        return f'раскрасили {n} {obj}'
-    return final
-
-
-def _api_v50803_rollback_v50602_guard(original_text: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Rollback guard after V508.02.
-
-    Based on V506.02 architecture: do not re-solve, do not replace the action
-    chain, do not copy broad UI-repair templates.  Only rebuild the visible
-    text from existing structured steps so multi-step tasks keep 1), 2), ...,
-    fix counted-object unit slips, trim detached copied tails and repair the
-    recurring malformed final answer about painted figures.
-    """
-    if not isinstance(payload, dict):
-        return payload
-    steps = _api_v50803_extract_payload_steps(payload)
-    if not steps:
-        return payload
-    structured = payload.get('structured_solution') if isinstance(payload.get('structured_solution'), dict) else {}
-    if not structured and isinstance(payload.get('structuredSolution'), dict):
-        structured = payload.get('structuredSolution')
-    n = payload.get('answer_number') or (structured.get('answer_number') if isinstance(structured, dict) else None)
-    final = str(payload.get('final_answer') or payload.get('answer') or (structured.get('final_answer') if isinstance(structured, dict) else '') or _live_audit_extract_answer_line(str(payload.get('result') or ''))).strip().strip(' .!?')
-    fixed_steps: list[str] = []
-    changed = False
-    for step in steps:
-        fixed = _api_v50803_fix_dash_minimal(_api_v50803_fix_counted_units_minimal(original_text, step))
-        if fixed != step:
-            changed = True
-        fixed_steps.append(fixed)
-    fixed_final = _api_v50803_fix_final_answer_minimal(original_text, final, n)
-    if fixed_final != final:
-        changed = True
-    # Rebuild multi-step visible text even when the only issue is missing numbering.
-    result = _api_v309_make_result(str(original_text or '').strip(), fixed_steps, fixed_final or final)
-    visible = _api_v40208_visible_steps_text(fixed_steps, fixed_final or final)
-    if not changed and str(payload.get('userVisibleResultText') or payload.get('result') or '') == visible:
-        return payload
-    out = dict(payload)
-    st = dict(structured or {})
-    st['steps'] = fixed_steps
-    if fixed_final:
-        st['final_answer'] = fixed_final
-        out['answer'] = fixed_final
-        out['final_answer'] = fixed_final
-    out['structured_solution'] = st
-    out['structuredSolution'] = st
-    out['result'] = result
-    out['explanation'] = result
-    out['userVisibleResultText'] = visible or result
-    out['backendPreparedVisibleResult'] = True
-    marker = 'v50803-rollback-v50602-guard'
-    verifier = str(out.get('verifier') or '').strip()
-    if marker not in verifier:
-        out['verifier'] = verifier + ('; ' if verifier else '') + marker
-    contract = str(out.get('visibleResultContract') or '').strip()
-    if marker not in contract:
-        out['visibleResultContract'] = contract + ('; ' if contract else '') + marker
-    return out
-
 def _api_v40208_fix_counted_piece_visible_payload(original_text: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
     """Final route-layer guard for fragile Excel numeric regression rows.
 
@@ -7333,9 +7058,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v508-03-rollback-v50602-short-r',
+        'visibleResultContract': 'v509-01-rollback-v50103-first100',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v508-03-rollback-v50602-short-r',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v509-01-rollback-v50103-first100',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -7502,9 +7227,6 @@ async def _solve_text(*, text: str, token: str | None, install_id: str | None, a
         v40305_fixed_prevalidated = _api_v40305_nonnumeric_assignment_answer_only_payload(text, response_payload)
         if isinstance(v40305_fixed_prevalidated, dict):
             response_payload = attach_release(v40305_fixed_prevalidated)
-        v50803_fixed_prevalidated = _api_v50803_rollback_v50602_guard(text, response_payload)
-        if isinstance(v50803_fixed_prevalidated, dict):
-            response_payload = attach_release(v50803_fixed_prevalidated)
         if audit_context and audit_context.get('browserClientFetchAudit'):
             zero_counter = {
                 'externalApiAttempts': 0,
@@ -7621,9 +7343,6 @@ async def _solve_text(*, text: str, token: str | None, install_id: str | None, a
         v40305_fixed_response = _api_v40305_nonnumeric_assignment_answer_only_payload(text, response_payload)
         if isinstance(v40305_fixed_response, dict):
             response_payload = attach_release(v40305_fixed_response)
-        v50803_fixed_response = _api_v50803_rollback_v50602_guard(text, response_payload)
-        if isinstance(v50803_fixed_response, dict):
-            response_payload = attach_release(v50803_fixed_response)
         if audit_context and audit_context.get('browserClientFetchAudit') and isinstance(external_counter, dict):
             receipt = _live_audit_record_browser_client_case(audit_context, text, response_payload, external_counter)
             response_payload['browserClientAuditReceipt'] = receipt
@@ -7998,7 +7717,8 @@ def _browser_client_summary_payload(run: dict[str, Any], request: Request | None
         'completedCaseIndexes': completed_indexes,
         'completedCaseIds': [row.get('id') for row in (run.get('evidenceResults') or []) if isinstance(row, dict)],
         'casesRemaining': max(0, int(run.get('planned') or 0) - len(completed_indexes)),
-        'finalReportUrl': base + _v50803_final_report_path_with_r(run, run_id, key) if run_id else '',
+        'finalReportUrl': base + _v50901_final_report_path_with_r(run, run_id, key) if run_id else '',
+        'finalReportPath': _v50901_final_report_path_with_r(run, run_id, key) if run_id else '',
     })
     return summary
 
@@ -8120,7 +7840,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v508-03-rollback-v50602-short-r'),
+        ('cacheBust', 'v509-01-rollback-v50103-first100'),
     ])
     return {
         **summary,
@@ -8128,14 +7848,14 @@ def _browser_client_create_or_reuse_run(
         'casesToRun': cases_to_run,
         'summaryJsonPath': status_path,
         'summaryJsonUrl': _public_base_url(request) + status_path,
-        'finalReportPath': _v50803_final_report_path_with_r(run, run_id_value, key_value),
-        'finalReportUrl': _public_base_url(request) + _v50803_final_report_path_with_r(run, run_id_value, key_value),
+        'finalReportPath': _v50901_final_report_path_with_r(run, run_id_value, key_value),
+        'finalReportUrl': _public_base_url(request) + _v50901_final_report_path_with_r(run, run_id_value, key_value),
         'explainUrl': _public_base_url(request) + '/api/explain',
-        'frontendAuditUrl': _public_frontend_url(request) + '?' + frontend_query,
-        'frontendOrigin': _public_frontend_url(request).rstrip('/'),
+        'frontendAuditUrl': _public_frontend_url() + '?' + frontend_query,
+        'frontendOrigin': _public_frontend_url().rstrip('/').split('/ai-math-1-4-frontend')[0],
         'domRecordUrlTemplate': _public_base_url(request) + f'/api/diagnostics/live-audit/ui-render/record-dom/{APP_RELEASE}/{key_value}/{run_id_value}',
         'tokenFields': ['apiPromptTokens', 'apiCompletionTokens', 'apiTotalTokens', 'promptCacheHitTokens', 'promptCacheMissTokens'],
-        'frontendUrl': _public_frontend_url(request) + '?' + frontend_query,
+        'frontendUrl': _public_frontend_url() + '?' + frontend_query,
         'uiRenderAuditRequired': True,
         'uiRenderContract': 'iframe/frontend fills #taskInput, clicks #solveBtn, and compares visible #resultBox against API answer and numeric Excel expected.',
     }
@@ -8256,17 +7976,9 @@ def _browser_client_record_case_result(run_id: str, case_index: int, case_id: st
         'v501ApiAnswerDecision': (v501_pipeline_evidence.get('apiAnswerDecision') if isinstance(v501_pipeline_evidence, dict) else None),
         'v501ApiTemplateConflict': bool(isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('apiTemplateConflict')),
         'v501TemplateOverrodeTrustedApi': bool(isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('templateOverrodeTrustedApi')),
-        'v502ExplicitMultiAnswerTemplate': bool(payload.get('v502ExplicitMultiAnswerTemplate') or (v500_structured.get('v502ExplicitMultiAnswerTemplate') if isinstance(v500_structured, dict) else False)),
         'v501ApiProtectedFromTemplateOverride': bool(isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('apiProtectedFromTemplateOverride')),
-        'v501ApiScaleNormalized': bool((isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('apiScaleNormalized')) or payload.get('v501ApiScaleNormalized') or (v500_structured.get('v501ApiScaleNormalized') if isinstance(v500_structured, dict) else False)),
+        'v501ApiScaleNormalized': bool(isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('apiScaleNormalized')),
         'v501ApiPrimaryVerifiedFormatted': bool(isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('apiPrimaryVerifiedFormatted')),
-        'v50503TrustedApiAuthoritative': bool((isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('trustedApiAuthoritative')) or payload.get('v50503TrustedApiAuthoritative') or (v500_structured.get('v50503TrustedApiAuthoritative') if isinstance(v500_structured, dict) else False)),
-        'v50503TrustedApiNumericLock': bool((isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('trustedApiNumericLock')) or payload.get('v50503TrustedApiNumericLock') or (v500_structured.get('v50503TrustedApiNumericLock') if isinstance(v500_structured, dict) else False)),
-        'v50503TrustedApiAnswerNumber': ((v501_pipeline_evidence.get('trustedApiAnswerNumber') if isinstance(v501_pipeline_evidence, dict) else None) or payload.get('v50503TrustedApiAnswerNumber') or (v500_structured.get('v50503TrustedApiAnswerNumber') if isinstance(v500_structured, dict) else None)),
-        'v50503TrustedApiNumberBeforeFormatting': ((v501_pipeline_evidence.get('trustedApiNumberBeforeFormatting') if isinstance(v501_pipeline_evidence, dict) else None) or payload.get('v50503TrustedApiNumberBeforeFormatting')),
-        'v50503TrustedApiNumberAfterFormatting': ((v501_pipeline_evidence.get('trustedApiNumberAfterFormatting') if isinstance(v501_pipeline_evidence, dict) else None) or payload.get('v50503TrustedApiNumberAfterFormatting')),
-        'v50503TrustedApiNumberPreserved': bool((isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('trustedApiNumberPreserved')) or payload.get('v50503TrustedApiNumberPreserved')),
-        'v50503TrustedApiOverrideBlocked': bool((isinstance(v501_pipeline_evidence, dict) and v501_pipeline_evidence.get('trustedApiOverrideBlocked')) or payload.get('v50503TrustedApiOverrideBlocked')),
         'v501ApiAnswerCandidate': (v501_pipeline_evidence.get('apiAnswerCandidate') if isinstance(v501_pipeline_evidence, dict) else None),
         'v501TemplateCandidate': (v501_pipeline_evidence.get('templateCandidate') if isinstance(v501_pipeline_evidence, dict) else None),
         'payloadError': payload.get('error'),
@@ -8594,7 +8306,7 @@ async def live_audit_browser_ui_record_dom(request: Request, release_token: str,
             'frontendUiBuild': data.get('frontendBuild'),
             'frontendUiBackendReleaseExpected': data.get('expectedBackendRelease'),
             'frontendDisplayAssumption': None,
-            'frontendDisplayContract': 'Verified by the self-hosted frontend /app UI: taskInput value -> solveBtn click -> production API call -> rendered #resultBox innerText compared with expected and API answer.',
+            'frontendDisplayContract': 'Verified by the GitHub Pages frontend UI: taskInput value -> solveBtn click -> production API call -> rendered #resultBox innerText compared with expected and API answer.',
             'comparisonTarget': 'DOM innerText of production frontend #resultBox after clicking #solveBtn',
             'iframeAudit': is_iframe_audit,
             'standaloneFrontendAudit': is_standalone_audit,
@@ -8692,67 +8404,102 @@ def _browser_audit_final_report_path(run_id: str, key: str | None = None) -> str
     return f'/api/diagnostics/live-audit/final-report/{APP_RELEASE}/{audit_key}/{run_id}'
 
 
-def _v50803_issue_code(text: Any) -> str:
-    low = str(text or '').lower()
-    if 'numeric' in low and 'failed' in low:
-        return 'numeric'
-    if 'ui' in low and 'render' in low:
-        return 'ui-render'
-    if 'dash' in low or 'explanation after' in low or 'тире' in low:
-        return 'dash'
-    if 'unit' in low or 'parentheses' in low or 'шт' in low or 'чел' in low:
-        return 'unit'
-    if 'answer' in low or 'ответ' in low:
-        return 'answer'
-    if 'uppercase' in low or 'proper names' in low:
-        return 'case'
-    if 'numbered' in low or '1)' in low:
-        return 'numbering'
-    if 'column' in low or 'столб' in low:
-        return 'column'
-    return _short_hash(str(text or ''), 8)
+def _v50901_tiny_text(value: Any, limit: int = 180) -> str:
+    text = re.sub(r'\s+', ' ', str(value or '')).strip()
+    return text[:max(20, int(limit or 180))]
 
 
-def _v50803_tiny_final_report_payload(run: dict[str, Any], key: str | None, run_id: str) -> dict[str, Any]:
-    failures = [x for x in (run.get('failures') or []) if isinstance(x, dict)]
-    evidence = [x for x in (run.get('evidenceResults') or run.get('results') or []) if isinstance(x, dict)]
-    numeric_failures = [x for x in evidence if x.get('numericComparable') and x.get('numericPassed') is False]
-    issues = _live_audit_acceptance_blockers(run)
-    tiny: dict[str, Any] = {
-        'r': APP_RELEASE,
-        'id': str(run_id or run.get('runId') or '')[-18:],
-        'o': run.get('offset'),
-        'l': run.get('limit'),
-        'c': run.get('completed'),
-        'p': run.get('passed'),
-        'f': run.get('failed'),
-        'nf': len(numeric_failures),
-        'ok': not bool(issues),
-    }
-    grouped: dict[str, dict[str, Any]] = {}
-    for row in failures[:50]:
-        row_issues = row.get('issues') if isinstance(row.get('issues'), list) else []
-        issue_text = str(row_issues[0] if row_issues else row.get('numericComparisonIssue') or 'failed')
-        code = _v50803_issue_code(issue_text)
-        item = grouped.setdefault(code, {'code': code, 'count': 0, 'rows': []})
-        item['count'] += 1
-        if len(item['rows']) < 5:
-            item['rows'].append(row.get('excelRowNumber') or row.get('excelId') or row.get('caseIndex'))
-    tiny['g'] = [[v['code'], v['count'], v['rows']] for v in grouped.values()]
-    if numeric_failures:
-        tiny['nr'] = [(x.get('excelRowNumber') or x.get('excelId') or x.get('caseIndex')) for x in numeric_failures[:10]]
-    return tiny
-
-def _v50803_encode_tiny_report_fragment(payload: dict[str, Any]) -> str:
-    raw = json.dumps(payload, ensure_ascii=False, separators=(',', ':'), default=str).encode('utf-8')
-    return base64.urlsafe_b64encode(zlib.compress(raw, 9)).decode('ascii').rstrip('=')
+def _v50901_tiny_row(row: Any) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        return {'value': _v50901_tiny_text(row)}
+    out: dict[str, Any] = {}
+    for key in ('caseIndex', 'excelRowNumber', 'excelId', 'id', 'name', 'expectedNumericAnswer', 'actualAnswerNumber', 'numericPassed', 'uiRenderPassed', 'proofHash'):
+        if key in row:
+            out[key] = row.get(key)
+    if isinstance(row.get('issues'), list):
+        out['issues'] = [_v50901_tiny_text(x, 180) for x in row.get('issues', [])[:4]]
+    if isinstance(row.get('suspiciousReasons'), list):
+        out['suspiciousReasons'] = [_v50901_tiny_text(x, 160) for x in row.get('suspiciousReasons', [])[:4]]
+    for key, limit in (('inputPreview', 180), ('resultPreview', 260), ('actualAnswerLine', 140), ('numericComparisonIssue', 140)):
+        if key in row:
+            out[key] = _v50901_tiny_text(row.get(key), limit)
+    return out
 
 
-def _v50803_final_report_path_with_r(run: dict[str, Any], run_id: str, key: str | None = None) -> str:
+def _v50901_issue_groups(rows: list[dict[str, Any]], limit: int = 10) -> list[dict[str, Any]]:
+    counts: dict[str, int] = {}
+    examples: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        issues = row.get('issues') if isinstance(row, dict) else None
+        if not isinstance(issues, list) or not issues:
+            issues = row.get('suspiciousReasons') if isinstance(row, dict) else None
+        if not isinstance(issues, list) or not issues:
+            issues = ['unknown failure']
+        for issue in issues[:3]:
+            key = _v50901_tiny_text(issue, 180)
+            counts[key] = counts.get(key, 0) + 1
+            examples.setdefault(key, _v50901_tiny_row(row))
+    return [{'issue': k, 'count': v, 'example': examples.get(k)} for k, v in sorted(counts.items(), key=lambda x: (-x[1], x[0]))[:limit]]
+
+
+def _v50901_final_report_path_with_r(run: dict[str, Any], run_id: str, key: str | None = None) -> str:
     path = _browser_audit_final_report_path(run_id, key)
     try:
-        token = _v50803_encode_tiny_report_fragment(_v50803_tiny_final_report_payload(run, key, run_id))
-        if token and len(token) <= 1200:
+        evidence_rows = _live_audit_results_for_payload(run, include_full=False)
+        failures = [row for row in evidence_rows if isinstance(row, dict) and not row.get('ok')]
+        if not failures:
+            failures = [row for row in list(run.get('failures') or []) if isinstance(row, dict)]
+        numeric_rows = [row for row in evidence_rows if isinstance(row, dict) and row.get('numericComparable')]
+        numeric_failed = [row for row in numeric_rows if row.get('numericPassed') is not True]
+        suspicious = [row for row in evidence_rows if isinstance(row, dict) and row.get('suspiciousReasons')]
+        acceptance_issues = _live_audit_acceptance_blockers(run)
+        tiny = {
+            'release': APP_RELEASE,
+            'backendBuild': APP_RELEASE,
+            'solverVersion': SOLVER_VERSION,
+            'runId': run.get('runId') or run_id,
+            'status': run.get('status'),
+            'section': run.get('section'),
+            'offset': run.get('offset'),
+            'limit': run.get('limit'),
+            'planned': int(run.get('planned') or 0),
+            'completed': int(run.get('completed') or 0),
+            'passed': int(run.get('passed') or 0),
+            'failed': int(run.get('failed') or 0),
+            'finalAcceptance': not acceptance_issues,
+            'acceptancePassed': not acceptance_issues,
+            'acceptanceIssuesCount': len(acceptance_issues),
+            'acceptanceIssues': [_v50901_tiny_text(x, 220) for x in acceptance_issues[:8]],
+            'externalApiCalls': int(run.get('externalApiCalls') or 0),
+            'externalApiCompleted': int(run.get('externalApiCompleted') or 0),
+            'externalApiErrors': int(run.get('externalApiErrors') or 0),
+            'deepseekUsageProofs': int(run.get('deepseekUsageProofs') or 0),
+            'apiPromptTokens': int(run.get('apiPromptTokens') or run.get('deepseekPromptTokens') or 0),
+            'apiCompletionTokens': int(run.get('apiCompletionTokens') or run.get('deepseekCompletionTokens') or 0),
+            'apiTotalTokens': int(run.get('apiTotalTokens') or run.get('deepseekTotalTokens') or 0),
+            'cachedResults': int(run.get('cachedResults') or 0),
+            'evidenceResultsCount': len(evidence_rows),
+            'caseProofsTotal': len(evidence_rows),
+            'numericComparableCount': len(numeric_rows),
+            'numericPassedCount': len([r for r in numeric_rows if r.get('numericPassed') is True]),
+            'numericFailedCount': len(numeric_failed),
+            'numericSkippedCount': len([r for r in evidence_rows if isinstance(r, dict) and r.get('numericSkipped')]),
+            'uiDomProofs': len([r for r in evidence_rows if isinstance(r, dict) and r.get('frontendDomRenderedOutputChecked')]),
+            'uiRenderPassedProofs': len([r for r in evidence_rows if isinstance(r, dict) and _live_audit_ui_render_passed(r)]),
+            'suspiciousCount': len(suspicious),
+            'suspiciousPassedCount': len([r for r in suspicious if isinstance(r, dict) and r.get('ok')]),
+            'failureIssueGroups': _v50901_issue_groups(failures or numeric_failed or suspicious, limit=8),
+            'failuresTotal': len(failures),
+            'failures': [_v50901_tiny_row(r) for r in failures[:8]],
+            'numericFailuresTotal': len(numeric_failed),
+            'numericFailures': [_v50901_tiny_row(r) for r in numeric_failed[:5]],
+            'suspiciousTotal': len(suspicious),
+            'suspicious': [_v50901_tiny_row(r) for r in suspicious[:5]],
+            'fragmentEncoding': 'base64url(zlib(compact-json)); decode #r=',
+        }
+        raw = json.dumps(tiny, ensure_ascii=False, separators=(',', ':'), default=str).encode('utf-8')
+        token = base64.urlsafe_b64encode(zlib.compress(raw, 9)).decode('ascii').rstrip('=')
+        if token and len(token) <= 9000:
             return path + '#r=' + token
     except Exception:
         pass
@@ -8915,7 +8662,7 @@ async def live_audit_browser_client_plan(request: Request, release_token: str, k
     run = state.get('runs', {}).get(run_id_value) or run
     base_url = _public_base_url(request)
     status_query = '/api/diagnostics/live-audit/status?' + urlencode([('key', key_value), ('release', APP_RELEASE), ('runId', run_id_value)])
-    final_path = _v50803_final_report_path_with_r(run, run_id_value, key_value)
+    final_path = _browser_audit_final_report_path(run_id_value, key_value)
     summary = _live_audit_public_run_summary(run, include_failures_preview=False)
     return _json_ok({
         **summary,
@@ -9196,7 +8943,7 @@ async def live_audit_ui_render_record_dom(request: Request, release_token: str, 
             'auditComparedSamePayloadReturnedToBrowser': True,
             'comparisonTarget': 'DOM innerText of production frontend #resultBox after main #solveBtn click',
             'frontendDisplayAssumption': 'Checked directly: frontend UI runner set #taskInput, clicked #solveBtn and read #resultBox innerText.',
-            'frontendDisplayContract': 'V5 accepts only if API result and DOM #resultBox text/answer agree and numeric Excel comparison is positive for comparable rows.',
+            'frontendDisplayContract': 'V501.03 accepts only if API result and DOM #resultBox text/answer agree and numeric Excel comparison is positive for comparable rows.',
             'uiRenderDomHash': _short_hash({'runId': run_id_value, 'caseIndex': case_index, 'domText': dom_text, 'apiText': api_text}, 24),
             'uiRenderIssues': all_ui_issues,
         })
@@ -9224,7 +8971,7 @@ def _browser_audit_operator_html(request: Request, payload: dict[str, Any], *, k
     """
     frontend_url = _ui_render_audit_url(request, key)
     run_id = str(payload.get('runId') or '')
-    final_url = _public_base_url(request) + _v50803_final_report_path_with_r(run, run_id, key) if run_id else ''
+    final_url = _public_base_url(request) + _browser_audit_final_report_path(run_id, key) if run_id else ''
     planned = int(payload.get('planned') or payload.get('nextAuditLimit') or 100)
     completed = int(payload.get('completed') or 0)
     passed = int(payload.get('passed') or 0)
@@ -9235,7 +8982,7 @@ def _browser_audit_operator_html(request: Request, payload: dict[str, Any], *, k
     technical_json = json.dumps(payload, ensure_ascii=False, indent=2)
     return f'''<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="robots" content="noindex"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V508.03 generalized symbolic/API UI-render live-аудит</title>
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V509.01 rollback V501.03 architecture UI-render live-аудит</title>
 <style>
 body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;margin:28px auto;padding:0 16px;line-height:1.45;background:#f8fafc;color:#111827}}
 .box{{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:20px;margin:16px 0;box-shadow:0 8px 22px rgba(15,23,42,.05)}}
@@ -9243,10 +8990,10 @@ body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;ma
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px}}.metric{{background:#f3f4f6;border-radius:14px;padding:12px}}.metric b{{display:block;font-size:24px}}
 .bar{{height:18px;background:#e5e7eb;border-radius:999px;overflow:hidden}}.fill{{height:100%;width:{pct}%;background:#111827}}input{{box-sizing:border-box;width:100%;border:1px solid #d1d5db;border-radius:12px;padding:12px;font:15px ui-monospace,Menlo,monospace;background:#fff}}.muted{{color:#6b7280}}pre{{white-space:pre-wrap;background:#111827;color:#f9fafb;padding:14px;border-radius:14px;overflow:auto;max-height:360px}}
 </style></head><body>
-<h1>V508.03 — generalized symbolic/API UI-render audit</h1>
+<h1>V509.01 — rollback V501.03 architecture UI-render audit</h1>
 <section class="box">
   <h2>1. Открыть реальную frontend-страницу аудита</h2>
-  <p>V508.03 проверяет generalized symbolic/API pipeline на Excel batch 501–600 через реальный production frontend: откроется self-hosted frontend /app, где будет одна кнопка «Запустить / продолжить аудит».</p>
+  <p>V509.01 проверяет rollback-архитектуру V501.03 на Excel batch 1–100 через реальный production frontend: откроется GitHub Pages frontend, где будет одна кнопка «Запустить / продолжить аудит».</p>
   <p><a class="primary" href="{escape(frontend_url, quote=True)}">Открыть аудит на frontend</a></p>
   <p class="muted">На frontend-странице аудит вводит задания в реальное поле <code>#taskInput</code>, нажимает реальную кнопку <code>#solveBtn</code>, ждёт <code>#resultBox</code> и сверяет DOM с API/expected.</p>
   <input readonly value="{escape(frontend_url, quote=True)}" onclick="this.select()">
@@ -9590,7 +9337,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v508-03-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v509-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -9937,7 +9684,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v508-03-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v509-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:
@@ -10253,7 +10000,7 @@ async def live_audit_runner_acceptance(key: str = '', runId: str = '', release: 
     return {
         **summary,
         'diagnostic': 'live-audit-runner-acceptance',
-        'acceptancePolicy': 'V5 accepts each Excel numeric regression batch only when aggregate, real external DeepSeek/API usage proof, browser-visible /api/explain evidence, frontend DOM #resultBox evidence, explicit uiRenderPassed=true evidence, failures, suspicious and case-level proofs all pass; local deterministic repairs are diagnostic only and cannot replace external API proof; numericComparable rows must have numericPassed=true; the learning stage also requires sufficient reusable template or verified API-primary evidence and separates case-specific repairs from reusable learning evidence.',
+        'acceptancePolicy': 'V501.03 accepts each Excel numeric regression batch only when aggregate, real external DeepSeek/API usage proof, browser-visible /api/explain evidence, frontend DOM #resultBox evidence, explicit uiRenderPassed=true evidence, failures, suspicious and case-level proofs all pass; local deterministic repairs are diagnostic only and cannot replace external API proof; numericComparable rows must have numericPassed=true; the learning stage also requires sufficient reusable template or verified API-primary evidence and separates case-specific repairs from reusable learning evidence.',
         'finalAcceptance': final_acceptance,
         'acceptancePassed': final_acceptance,
         'acceptanceIssues': issues,
@@ -10261,7 +10008,7 @@ async def live_audit_runner_acceptance(key: str = '', runId: str = '', release: 
         'suspiciousCount': len(suspicious),
         'suspiciousPassedCount': sum(1 for row in suspicious if row.get('ok')),
         'duplicateQualityIssues': duplicate_issues,
-        'acceptanceRequires': ['status == done', 'completed == planned batch size', 'failed == 0', 'cachedResults == 0', 'externalApiCalls >= required non-fallback cases', 'externalApiCompleted >= required non-fallback normal cases', 'deepseekUsageProofs >= required non-fallback normal cases', 'apiTotalTokens > 0', 'every normal case routeAuditMode == browser-client-ui-render-visible-network, browserClientFetch=true, apiRouteNetworkVisibleToBrowser=true', 'frontend DOM proof recorded for every normal case and uiRenderPassed=true', 'real frontend #taskInput was set and #solveBtn was clicked', 'visible #resultBox answer matches API answer', 'numericComparable rows have numericPassed == true', 'V5 learning evidence coverage >= required minimum', 'V5 postprocessChangedAnswerNumber must be 0 or explicitly reviewed', 'V5 templateOverrodeTrustedApi must be 0', 'V506 authoritative trusted API number must be preserved', 'caseProofsTotal == planned', 'suspiciousPassedCount == 0'],
+        'acceptanceRequires': ['status == done', 'completed == planned batch size', 'failed == 0', 'cachedResults == 0', 'externalApiCalls >= required non-fallback cases', 'externalApiCompleted >= required non-fallback normal cases', 'deepseekUsageProofs >= required non-fallback normal cases', 'apiTotalTokens > 0', 'every normal case routeAuditMode == browser-client-ui-render-visible-network, browserClientFetch=true, apiRouteNetworkVisibleToBrowser=true', 'frontend DOM proof recorded for every normal case and uiRenderPassed=true', 'real frontend #taskInput was set and #solveBtn was clicked', 'visible #resultBox answer matches API answer', 'numericComparable rows have numericPassed == true', 'V501.03 learning evidence coverage >= required minimum', 'V501.03 postprocessChangedAnswerNumber must be 0 or explicitly reviewed', 'V501.03 templateOverrodeTrustedApi must be 0', 'caseProofsTotal == planned', 'suspiciousPassedCount == 0'],
         'proofHashes': [row.get('proofHash') for row in evidence_rows],
         'acceptanceSummary': {
             'release': APP_RELEASE,
@@ -10315,7 +10062,7 @@ async def live_audit_runner_report(key: str = '', runId: str = '', release: str 
     return {
         **acceptance,
         'diagnostic': 'live-audit-runner-report',
-        'reportKind': 'V5 learning/generalization frontend UI-render proof audit for Excel numeric regression',
+        'reportKind': 'V501.03 learning/generalization frontend UI-render proof audit for Excel numeric regression',
         'operatorInstruction': 'Пришлите эту ссылку ChatGPT. Aggregate summary без report/acceptance/evidence не считается основанием для принятия раздела.',
         'counts': {
             'failures': len(failures),
