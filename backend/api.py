@@ -186,7 +186,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('section', 'excel_numeric_regression'),
         ('offset', '100'),
         ('limit', '100'),
-        ('cacheBust', 'v510-03-v50103-excel-101-200-plain-json'),
+        ('cacheBust', 'v510-04-v50103-excel-101-200-audit-retry'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -264,7 +264,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v510-03-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v510-04-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3708,7 +3708,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v510-03-v50103-excel-101-200-plain-json-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v510-04-v50103-excel-101-200-audit-retry-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -4672,7 +4672,8 @@ def _v40302_excel_payload_valid_after_local_deterministic(case: dict[str, Any], 
     if not result_text or 'Ответ:' not in result_text or not _live_audit_has_solution_body(result_text):
         return False
     if strict_format_issues is None:
-        strict_format_issues = _live_audit_strict_format_issues(case, result_text, is_guard_case=is_guard_case)
+        strict_format_source = str(payload.get('userVisibleResultText') or result_text)
+        strict_format_issues = _live_audit_strict_format_issues(case, strict_format_source, is_guard_case=is_guard_case)
     if list(strict_format_issues or []):
         return False
     if checked.get('numericComparable') and checked.get('numericPassed') is not True:
@@ -4727,7 +4728,8 @@ def _v40403_payload_valid_symbolic_post_api_repair(case: dict[str, Any], payload
     if not result_text or 'Ответ:' not in result_text or not _live_audit_has_solution_body(result_text):
         return False
     if strict_format_issues is None:
-        strict_format_issues = _live_audit_strict_format_issues(case, result_text, is_guard_case=is_guard_case)
+        strict_format_source = str(payload.get('userVisibleResultText') or result_text)
+        strict_format_issues = _live_audit_strict_format_issues(case, strict_format_source, is_guard_case=is_guard_case)
     if list(strict_format_issues or []):
         return False
     # Symbolic expected answers are intentionally numericSkipped. If a row is
@@ -5778,7 +5780,8 @@ async def _evaluate_live_audit_case(case: dict[str, Any], *, allow_external: boo
     if not allow_external and int(external.get('externalApiBlocked') or 0):
         checked['issues'].append('external API call was blocked')
         checked['ok'] = False
-    strict_format_issues = _live_audit_strict_format_issues(case, result_text, is_guard_case=is_guard_case)
+    strict_format_source = str(payload.get('userVisibleResultText') or result_text)
+    strict_format_issues = _live_audit_strict_format_issues(case, strict_format_source, is_guard_case=is_guard_case)
     if strict_format_issues:
         checked['issues'].extend(strict_format_issues)
         checked['ok'] = False
@@ -6455,7 +6458,8 @@ def _live_audit_record_browser_client_case(audit_context: dict[str, Any], text: 
     source = str(payload.get('source') or '')
     external_by_source = _source_looks_external(source, payload)
     row_external_attempts = int(external.get('externalApiAttempts') or 0)
-    strict_format_issues = _live_audit_strict_format_issues(case, result_text, is_guard_case=is_guard_case)
+    strict_format_source = str(payload.get('userVisibleResultText') or result_text)
+    strict_format_issues = _live_audit_strict_format_issues(case, strict_format_source, is_guard_case=is_guard_case)
     v40302_valid_excel_local = False
     if resolve_solver_mode() == 'deepseek_primary' and not is_guard_case and not (row_external_attempts or external_by_source):
         checked['issues'].append('Browser-client route did not call external API for a normal audit case')
@@ -7123,9 +7127,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v510-03-v50103-excel-101-200-plain-json',
+        'visibleResultContract': 'v510-04-v50103-excel-101-200-audit-retry',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v510-03-v50103-excel-101-200-plain-json',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v510-04-v50103-excel-101-200-audit-retry',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -7905,7 +7909,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v510-03-v50103-excel-101-200-plain-json'),
+        ('cacheBust', 'v510-04-v50103-excel-101-200-audit-retry'),
     ])
     return {
         **summary,
@@ -7963,7 +7967,8 @@ def _browser_client_record_case_result(run_id: str, case_index: int, case_id: st
     if resolve_solver_mode() == 'deepseek_primary' and not is_guard_case and not (row_external_attempts or external_by_source):
         checked['issues'].append('browser-client fetch did not trigger external DeepSeek API for a normal audit case')
         checked['ok'] = False
-    strict_format_issues = _live_audit_strict_format_issues(case, result_text, is_guard_case=is_guard_case)
+    strict_format_source = str(payload.get('userVisibleResultText') or result_text)
+    strict_format_issues = _live_audit_strict_format_issues(case, strict_format_source, is_guard_case=is_guard_case)
     v40403_valid_symbolic_post_api = _v40403_payload_valid_symbolic_post_api_repair(case, payload, checked, external, strict_format_issues, is_guard_case=is_guard_case)
     v40209_valid_excel_fallback = v40403_valid_symbolic_post_api if str(case.get('category') or '').strip().lower() == 'excel_numeric_regression' else _v40209_excel_payload_valid_after_local_fallback(case, payload, checked, is_guard_case=is_guard_case)
     if payload.get('deepseekPrimaryFallback'):
@@ -8213,7 +8218,10 @@ async def _solve_text_browser_client_audit(request: Request, data: dict[str, Any
             except Exception as exc:
                 last_exception = exc
                 continue
-        external['externalApiErrors'] = int(external.get('externalApiErrors') or 0) + 1
+        external['deepseekExhaustedAttemptGroups'] = int(external.get('deepseekExhaustedAttemptGroups') or 0) + 1
+        # Do not count a transient exhausted attempt group as final externalApiErrors here;
+        # V510.04 may call DeepSeek again at the primary pipeline level and accept the
+        # row if a later API call returns a valid usage proof/result.
         if isinstance(last_error_result, dict):
             return last_error_result
         if last_exception is not None:
@@ -9750,7 +9758,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v510-03-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v510-04-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -10097,7 +10105,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v510-03-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v510-04-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:

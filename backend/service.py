@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v510_03_v50103_excel_101_200_plain_json'
-SOLVER_VERSION = 'v510-03-v50103-excel-101-200-plain-json'
+APP_RELEASE = 'v510_04_v50103_excel_101_200_audit_retry'
+SOLVER_VERSION = 'v510-04-v50103-excel-101-200-audit-retry'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -11567,7 +11567,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v510-03-v50103-excel-101-200-plain-json'
+    marker = 'v510-04-v50103-excel-101-200-audit-retry'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -12660,14 +12660,27 @@ async def _generate_deepseek_primary_response(payload: str, *, allow_external: b
             'solverMode': SOLVER_MODE_DEEPSEEK_PRIMARY,
             'externalApiBlocked': True,
         })
-    try:
-        ai_payload = await _call_deepseek_primary(payload)
-    except Exception as exc:
-        local_payload = await _generate_local_primary_response(payload)
-        repaired = _v4011_repair_payload(local_payload, payload)
-        return attach_release(_tag_payload(repaired, solverMode=SOLVER_MODE_DEEPSEEK_PRIMARY, deepseekPrimaryFallback='deepseek_exception', deepseekError=str(exc)[:300]))
+    ai_payload = None
+    last_deepseek_exception: Exception | None = None
+    # V510.04: a transient empty/error DeepSeek response must not immediately
+    # downgrade a normal audit row to local fallback.  Retry the full primary
+    # API pipeline a few times; if any attempt produces a verified result, that
+    # result remains the locked source of truth for number and actions.
+    for _deepseek_primary_attempt in range(3):
+        try:
+            candidate_payload = await _call_deepseek_primary(payload)
+        except Exception as exc:
+            last_deepseek_exception = exc
+            continue
+        if isinstance(candidate_payload, dict) and candidate_payload.get('result'):
+            ai_payload = candidate_payload
+            break
     if isinstance(ai_payload, dict) and ai_payload.get('result'):
         return _postprocess_deepseek_primary_payload(ai_payload, payload)
+    if last_deepseek_exception is not None and not deepseek_api_key_configured():
+        local_payload = await _generate_local_primary_response(payload)
+        repaired = _v4011_repair_payload(local_payload, payload)
+        return attach_release(_tag_payload(repaired, solverMode=SOLVER_MODE_DEEPSEEK_PRIMARY, deepseekPrimaryFallback='deepseek_exception', deepseekError=str(last_deepseek_exception)[:300]))
     if _looks_like_v314_information_prompt(payload):
         structural_rescue = _verified_v314_information_payload(payload, {})
         if structural_rescue is not None:
