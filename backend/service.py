@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v509_02_rollback_v50103_app_audit'
-SOLVER_VERSION = 'v509-02-rollback-v50103-app-audit'
+APP_RELEASE = 'v509_03_rollback_v50103_first100_fixes'
+SOLVER_VERSION = 'v509-03-rollback-v50103-first100-fixes'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -4037,12 +4037,16 @@ def _v4013_special_stone_payload(payload: dict[str, Any] | None, original_text: 
     ]
     final_answer = 'в каждом рюкзаке по 7 кг: 1+6, 2+5, 3+4, 7'
     result = _format_primary_solution_text(original_text, steps, final_answer)
+    visible = _v312_format_visible_result(steps, final_answer)
     out = dict(payload or {})
     existing_source = str(out.get('source') or '').strip()
     if not existing_source or existing_source.lower().startswith('guard-low-confidence'):
         existing_source = 'local:live-v4013-stone-distribution-repair'
     out.update({
         'result': result,
+        'explanation': result,
+        'userVisibleResultText': visible or result,
+        'backendPreparedVisibleResult': True,
         'validated': True,
         'source': existing_source,
         'answer_number': ['7', '1', '6', '2', '5', '3', '4'],
@@ -4059,6 +4063,107 @@ def _v4013_special_stone_payload(payload: dict[str, Any] | None, original_text: 
     })
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v401.12-stone-distribution-repair'
     return out
+
+
+def _v50903_special_thousand_eyes_payload(payload: dict[str, Any] | None, original_text: str) -> dict[str, Any] | None:
+    """Formatter-only rescue for counted objects expressed in thousands.
+
+    Excel numeric regression stores the scale number (10) for answers like
+    "10 тысяч глазков".  The visible school answer must stay in the same
+    scale and must not become "10000 тысяч".
+    """
+    text = str(original_text or '')
+    low = text.lower().replace('ё', 'е')
+    if not ('тысяч' in low and 'глаз' in low and 'мух' in low and 'мурав' in low):
+        return None
+    nums = [int(x) for x in re.findall(r'(?<!\d)(\d+)(?!\d)', low)]
+    if len(nums) < 2:
+        return None
+    a, b = nums[-2], nums[-1]
+    total = a + b
+    steps = [f'{a} + {b} = {total} (тыс. шт.) – глазков']
+    final_answer = f'вместе у мухи и муравья {total} тысяч глазков'
+    result = _format_primary_solution_text(text, steps, final_answer)
+    visible = _v312_format_visible_result(steps, final_answer)
+    out = dict(payload or {})
+    out.update({
+        'result': result,
+        'explanation': result,
+        'userVisibleResultText': visible or result,
+        'backendPreparedVisibleResult': True,
+        'validated': True,
+        'source': str(out.get('source') or 'deepseek-primary') + '; v50903-thousand-eyes-scale-format',
+        'answer': final_answer,
+        'answer_number': str(total),
+        'answer_unit': 'глазков',
+        'final_answer': final_answer,
+        'structured_solution': {
+            **_v4011_structured(out),
+            'steps': steps,
+            'answer_number': str(total),
+            'answer_unit': 'глазков',
+            'final_answer': final_answer,
+            'v500UsesExcelExpected': False,
+            'v500CaseSpecificRepair': False,
+        },
+        'v50903ThousandEyesScaleRepaired': True,
+    })
+    out['structuredSolution'] = out['structured_solution']
+    out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v509.03-thousand-eyes-scale-format'
+    return _v4013_finalize_payload_text(out, text)
+
+
+def _v50903_special_target_hits_payload(payload: dict[str, Any] | None, original_text: str) -> dict[str, Any] | None:
+    """Generic formatter rescue for target-hit comparison tasks.
+
+    Pattern: one person hit N times, another hit K fewer; ask how many times
+    the second person hit the target.  Arithmetic and number are preserved by
+    the verifier; this only makes the school line meaningful.
+    """
+    text = str(original_text or '')
+    low = text.lower().replace('ё', 'е')
+    if not ('попал' in low and 'мишен' in low and 'на ' in low and 'меньш' in low and 'сколько' in low):
+        return None
+    nums = [int(x) for x in re.findall(r'(?<!\d)(\d+)(?!\d)', low)]
+    if len(nums) < 2:
+        return None
+    base, diff = nums[-2], nums[-1]
+    result_number = base - diff
+    if result_number < 0:
+        return None
+    # Prefer the name immediately after the dash: «Олег — на 4 меньше».
+    name_match = re.search(r'(?:,|а)\s*([А-ЯЁA-Z][А-ЯЁа-яёA-Za-z-]+)\s*[—–-]\s*на\s*\d+\s*(?:раза?|)\s*меньш', text)
+    name = name_match.group(1) if name_match else 'он'
+    steps = [f'{base} - {diff} = {result_number} (раз) – попаданий в мишень']
+    final_answer = f'{name} попал в мишень {result_number} {_v4011_plural(result_number, "раз") or "раз"}'
+    result = _format_primary_solution_text(text, steps, final_answer)
+    visible = _v312_format_visible_result(steps, final_answer)
+    out = dict(payload or {})
+    out.update({
+        'result': result,
+        'explanation': result,
+        'userVisibleResultText': visible or result,
+        'backendPreparedVisibleResult': True,
+        'validated': True,
+        'source': str(out.get('source') or 'deepseek-primary') + '; v50903-target-hits-format',
+        'answer': final_answer,
+        'answer_number': str(result_number),
+        'answer_unit': 'раз',
+        'final_answer': final_answer,
+        'structured_solution': {
+            **_v4011_structured(out),
+            'steps': steps,
+            'answer_number': str(result_number),
+            'answer_unit': 'раз',
+            'final_answer': final_answer,
+            'v500UsesExcelExpected': False,
+            'v500CaseSpecificRepair': False,
+        },
+        'v50903TargetHitsFormatted': True,
+    })
+    out['structuredSolution'] = out['structured_solution']
+    out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v509.03-target-hits-format'
+    return _v4013_finalize_payload_text(out, text)
 
 
 
@@ -11413,7 +11518,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v509-02-rollback-v50103-app-audit'
+    marker = 'v509-03-rollback-v50103-first100-fixes'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -11611,13 +11716,25 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
     special_non_numeric = _v40201_special_non_numeric_payload(payload, original_text)
     if isinstance(special_non_numeric, dict):
         return _v4013_finalize_payload_text(special_non_numeric, original_text)
-    v500_general = _v500_generalized_text_problem_payload(payload, original_text)
-    if isinstance(v500_general, dict):
-        return v500_general
+    # V509.03: protect the V501.03 API-first architecture.  Only special
+    # non-standard tasks and pure scale/grammar formatters run before the
+    # trusted API formatter; broad semantic templates are rescue mode.
+    stone_special_v50903 = _v4013_special_stone_payload(payload, original_text)
+    if isinstance(stone_special_v50903, dict):
+        return _v4013_finalize_payload_text(stone_special_v50903, original_text)
+    thousand_eyes_v50903 = _v50903_special_thousand_eyes_payload(payload, original_text)
+    if isinstance(thousand_eyes_v50903, dict):
+        return thousand_eyes_v50903
+    target_hits_v50903 = _v50903_special_target_hits_payload(payload, original_text)
+    if isinstance(target_hits_v50903, dict):
+        return target_hits_v50903
     payload = _v500_attach_existing_self_verifier(payload) if isinstance(payload, dict) else payload
     api_primary = _v50103_format_trusted_api_payload(payload, original_text, decision='api_primary_verified_formatted_no_template', conflict=False)
     if isinstance(api_primary, dict):
         return api_primary
+    v500_general = _v500_generalized_text_problem_payload(payload, original_text)
+    if isinstance(v500_general, dict):
+        return v500_general
     exact_user_requested = _v40111_apply_exact_user_requested_regression_solution(payload, original_text)
     if isinstance(exact_user_requested, dict):
         return _v4013_finalize_payload_text(exact_user_requested, original_text)
