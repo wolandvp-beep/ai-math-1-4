@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v509_05_rollback_v50103_chunked_full_json'
-SOLVER_VERSION = 'v509-05-rollback-v50103-chunked-full-json'
+APP_RELEASE = 'v509_07_rollback_v50103_clean_full_json'
+SOLVER_VERSION = 'v509-07-rollback-v50103-clean-full-json'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -11518,7 +11518,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v509-05-rollback-v50103-chunked-full-json'
+    marker = 'v509-07-rollback-v50103-clean-full-json'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
