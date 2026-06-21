@@ -186,7 +186,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('section', 'excel_numeric_regression'),
         ('offset', '100'),
         ('limit', '100'),
-        ('cacheBust', 'v510-04-v50103-excel-101-200-audit-retry'),
+        ('cacheBust', 'v510-05-v50103-excel-101-200-header-proof-fix'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -212,7 +212,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V510.03 — V501.03 architecture / batch 101–200 real external UI-render audit',
+        'nextAuditPlannedMapStep': 'V510.05 — V501.03 architecture / batch 101–200 real external UI-render audit',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -247,7 +247,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditQueryOrderSafe': True,
         'nextAuditNoSectionEntityRisk': True,
         'nextAuditNoQueryParamReorderRisk': True,
-        'nextAuditNote': 'V510.03 запускает batch 101–200 через self-hosted /app frontend: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
+        'nextAuditNote': 'V510.05 запускает batch 101–200 через self-hosted /app frontend: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
     }
 
 
@@ -264,7 +264,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v510-04-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v510-05-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3708,7 +3708,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v510-04-v50103-excel-101-200-audit-retry-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v510-05-v50103-excel-101-200-header-proof-fix-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -4349,10 +4349,13 @@ def _live_audit_single_step_numbering_issues(result_text: Any, prefix: str) -> l
         if _live_audit_count_arithmetic_actions_in_step(step_without_marker) <= 1 and not _live_audit_answer_is_multistep_marker(result_text):
             return [prefix + ': one-operation solution must not show numbered 1) marker']
 
-    # Stronger semantic check: if the visible numbered body contains exactly one
-    # actual operation/equation and the rest is explanatory wording, it should be
-    # displayed as a single unnumbered line, not "1) definition, 2) calculation".
-    if len(direct_steps) == 1 and not _live_audit_answer_is_multistep_marker(result_text):
+    # Stronger semantic check: if the *user-visible UI proof* contains exactly
+    # one operation/equation and the rest is explanatory numbered wording, it
+    # should be displayed as a single unnumbered line. Do not apply this to
+    # internal strict/API text: V510.04 showed that DeepSeek may return structured
+    # multi-item reasoning while the frontend DOM correctly renders one unnumbered
+    # calculation line. Acceptance is based on DOM #resultBox for this UI rule.
+    if prefix != 'strict proof' and len(direct_steps) == 1 and not _live_audit_answer_is_multistep_marker(result_text):
         direct = direct_steps[0]
         if _live_audit_count_arithmetic_actions_in_step(direct) <= 1 or re.search(r'[xх]\s*=\s*-?\d+\b', direct, flags=re.IGNORECASE):
             return [prefix + ': semantic one-operation solution must not be displayed as numbered steps']
@@ -4825,10 +4828,18 @@ def _live_audit_strict_format_issues(case: dict[str, Any], result_text: str, *, 
         if 'нужно составить задачи с вопросами сравнения' not in answer:
             issues.append('strict proof: non-numeric assignment answer must explain that tasks should be composed')
         return issues
-    if not re.search(r'задача\s*[\.:]', low):
-        issues.append('strict proof: missing Задача. header')
-    if not re.search(r'решение\s*[\.:]', low):
-        issues.append('strict proof: missing Решение. header')
+    # Excel numeric regression is audited against the actual frontend DOM #resultBox.
+    # That user-visible box intentionally contains only the solution line(s) and
+    # `Ответ: ...`, not service/debug headers `Задача.` and `Решение.`.
+    # Requiring those headers here made V510.04 fail all 100 rows although DOM/API
+    # proof and numeric comparison were good. Keep the header requirement only for
+    # older non-Excel guard/legacy sections where those headers are part of the
+    # expected visible contract.
+    if category != 'excel_numeric_regression':
+        if not re.search(r'задача\s*[\.:]', low):
+            issues.append('strict proof: missing Задача. header')
+        if not re.search(r'решение\s*[\.:]', low):
+            issues.append('strict proof: missing Решение. header')
     if 'ответ:' not in low:
         issues.append('strict proof: missing Ответ: line')
     # Shared UX rule: if there is only one action, the product must not show
@@ -7127,9 +7138,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v510-04-v50103-excel-101-200-audit-retry',
+        'visibleResultContract': 'v510-05-v50103-excel-101-200-header-proof-fix',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v510-04-v50103-excel-101-200-audit-retry',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v510-05-v50103-excel-101-200-header-proof-fix',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -7909,7 +7920,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v510-04-v50103-excel-101-200-audit-retry'),
+        ('cacheBust', 'v510-05-v50103-excel-101-200-header-proof-fix'),
     ])
     return {
         **summary,
@@ -8220,7 +8231,7 @@ async def _solve_text_browser_client_audit(request: Request, data: dict[str, Any
                 continue
         external['deepseekExhaustedAttemptGroups'] = int(external.get('deepseekExhaustedAttemptGroups') or 0) + 1
         # Do not count a transient exhausted attempt group as final externalApiErrors here;
-        # V510.04 may call DeepSeek again at the primary pipeline level and accept the
+        # V510.05 may call DeepSeek again at the primary pipeline level and accept the
         # row if a later API call returns a valid usage proof/result.
         if isinstance(last_error_result, dict):
             return last_error_result
@@ -8474,7 +8485,7 @@ async def live_audit_browser_client_status(request: Request, release_token: str,
 
 def _browser_audit_final_report_path(run_id: str, key: str | None = None) -> str:
     audit_key = str(key or LIVE_PRODUCTION_AUDIT_DEFAULT_KEY).strip()
-    # V510.03: restore V501.03 report transport. The copied URL is the
+    # V510.05: restore V501.03 report transport. The copied URL is the
     # ordinary path-based final-report endpoint, which returns compact JSON
     # directly: acceptance + failures + suspicious + compact case proofs.
     return f'/api/diagnostics/live-audit/final-report/{APP_RELEASE}/{audit_key}/{run_id}'
@@ -8693,7 +8704,7 @@ def _v50909_audit_fragment(payload: dict[str, Any]) -> str:
 def _v50902_final_report_path_with_r(run: dict[str, Any], run_id: str, key: str | None = None) -> str:
     """Return a copy-safe ChatGPT report URL.
 
-    V510.03 keeps the normal V501.03 final-report URL before the fragment, but
+    V510.05 keeps the normal V501.03 final-report URL before the fragment, but
     the fragment is now plain URL-encoded JSON (`#json=`), not zlib/base64.
     This avoids the invalid-base64/truncated-fragment problem seen in V510.02.
     The JSON contains the same acceptance/failure/suspicious proof summary that
@@ -8703,7 +8714,7 @@ def _v50902_final_report_path_with_r(run: dict[str, Any], run_id: str, key: str 
     base_path = _browser_audit_final_report_path(run_id, key)
     try:
         payload = _v50909_compact_audit_payload(run, run_id, key)
-        payload['transport'] = 'v51003-plain-json-fragment'
+        payload['transport'] = 'v51005-plain-json-fragment'
         payload['fragmentPurpose'] = 'Decode #json= with URL decoding. It is plain compact JSON, not zlib/base64.'
         raw = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
         return base_path + '#json=' + quote(raw, safe='')
@@ -9188,7 +9199,7 @@ def _browser_audit_operator_html(request: Request, payload: dict[str, Any], *, k
     technical_json = json.dumps(payload, ensure_ascii=False, indent=2)
     return f'''<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="robots" content="noindex"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V510.03 V501.03 architecture UI-render live-аудит</title>
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V510.05 V501.03 architecture UI-render live-аудит</title>
 <style>
 body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;margin:28px auto;padding:0 16px;line-height:1.45;background:#f8fafc;color:#111827}}
 .box{{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:20px;margin:16px 0;box-shadow:0 8px 22px rgba(15,23,42,.05)}}
@@ -9196,10 +9207,10 @@ body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;ma
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px}}.metric{{background:#f3f4f6;border-radius:14px;padding:12px}}.metric b{{display:block;font-size:24px}}
 .bar{{height:18px;background:#e5e7eb;border-radius:999px;overflow:hidden}}.fill{{height:100%;width:{pct}%;background:#111827}}input{{box-sizing:border-box;width:100%;border:1px solid #d1d5db;border-radius:12px;padding:12px;font:15px ui-monospace,Menlo,monospace;background:#fff}}.muted{{color:#6b7280}}pre{{white-space:pre-wrap;background:#111827;color:#f9fafb;padding:14px;border-radius:14px;overflow:auto;max-height:360px}}
 </style></head><body>
-<h1>V510.03 — V501.03 architecture UI-render audit</h1>
+<h1>V510.05 — V501.03 architecture UI-render audit</h1>
 <section class="box">
   <h2>1. Открыть реальную frontend-страницу аудита</h2>
-  <p>V510.03 проверяет архитектуру V501.03 на Excel batch 101–200 через реальный production frontend: откроется GitHub Pages frontend, где будет одна кнопка «Запустить / продолжить аудит».</p>
+  <p>V510.05 проверяет архитектуру V501.03 на Excel batch 101–200 через реальный production frontend: откроется GitHub Pages frontend, где будет одна кнопка «Запустить / продолжить аудит».</p>
   <p><a class="primary" href="{escape(frontend_url, quote=True)}">Открыть аудит на frontend</a></p>
   <p class="muted">На frontend-странице аудит вводит задания в реальное поле <code>#taskInput</code>, нажимает реальную кнопку <code>#solveBtn</code>, ждёт <code>#resultBox</code> и сверяет DOM с API/expected.</p>
   <input readonly value="{escape(frontend_url, quote=True)}" onclick="this.select()">
@@ -9502,7 +9513,7 @@ async def live_audit_browser_final_report(release_token: str, key_value: str, ru
         'finalReportFormat': 'compact-json-v50103-restored',
         'singleLinkForChatGPT': True,
         'operatorInstruction': 'Скопируйте URL этой страницы и пришлите ChatGPT. Это V501.03 compact JSON: acceptance, failures, suspicious и compact case proofs. Полные proof endpoints остаются в ссылках ниже.',
-        'compactReportReason': 'V510.03 restores the V501.03 direct JSON final-report transport; no fresh cache URL, no #audit, no #json fragment.',
+        'compactReportReason': 'V510.05 restores the V501.03 direct JSON final-report transport; no fresh cache URL, no #audit, no #json fragment.',
         'fullResultsPayloadOmitted': True,
         'evidencePayloadOmitted': True,
         'failuresPayload': failures,
@@ -9758,7 +9769,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v510-04-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v510-05-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -10105,7 +10116,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v510-04-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v510-05-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:

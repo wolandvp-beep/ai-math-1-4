@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v510_04_v50103_excel_101_200_audit_retry'
-SOLVER_VERSION = 'v510-04-v50103-excel-101-200-audit-retry'
+APP_RELEASE = 'v510_05_v50103_excel_101_200_header_proof_fix'
+SOLVER_VERSION = 'v510-05-v50103-excel-101-200-header-proof-fix'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -11567,7 +11567,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v510-04-v50103-excel-101-200-audit-retry'
+    marker = 'v510-05-v50103-excel-101-200-header-proof-fix'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -12662,7 +12662,7 @@ async def _generate_deepseek_primary_response(payload: str, *, allow_external: b
         })
     ai_payload = None
     last_deepseek_exception: Exception | None = None
-    # V510.04: a transient empty/error DeepSeek response must not immediately
+    # V510.05: a transient empty/error DeepSeek response must not immediately
     # downgrade a normal audit row to local fallback.  Retry the full primary
     # API pipeline a few times; if any attempt produces a verified result, that
     # result remains the locked source of truth for number and actions.
