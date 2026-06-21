@@ -40,7 +40,7 @@ app = FastAPI()
 def _mount_self_hosted_frontend() -> None:
     """Serve the bundled frontend from the backend host at /app/ with no-cache.
 
-    V509.08 intentionally does NOT use StaticFiles mount here: browsers cached
+    V509.09 intentionally does NOT use StaticFiles mount here: browsers cached
     app.bundle.js from older releases and then the UI expected the previous
     backend release. These custom handlers always return the exact assets from
     this zip with no-store headers and X-Matematichka-Release.
@@ -186,7 +186,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('section', 'excel_numeric_regression'),
         ('offset', '0'),
         ('limit', '100'),
-        ('cacheBust', 'v509-08-rollback-v50103-first100-finalfix'),
+        ('cacheBust', 'v509-09-rollback-v50103-audit-payload-link'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -264,7 +264,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v509-08-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v509-09-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3708,7 +3708,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v509-08-rollback-v50103-first100-finalfix-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v509-09-rollback-v50103-audit-payload-link-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -7123,9 +7123,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v509-08-rollback-v50103-first100-finalfix',
+        'visibleResultContract': 'v509-09-rollback-v50103-audit-payload-link',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v509-08-rollback-v50103-first100-finalfix',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v509-09-rollback-v50103-audit-payload-link',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -7905,7 +7905,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v509-08-rollback-v50103-first100-finalfix'),
+        ('cacheBust', 'v509-09-rollback-v50103-audit-payload-link'),
     ])
     return {
         **summary,
@@ -8467,7 +8467,7 @@ async def live_audit_browser_client_status(request: Request, release_token: str,
 def _browser_audit_final_report_path(run_id: str, key: str | None = None) -> str:
     audit_key = str(key or LIVE_PRODUCTION_AUDIT_DEFAULT_KEY).strip()
     nonce = _live_audit_fresh_nonce()
-    # V509.08: the link copied for ChatGPT is a direct fresh full-JSON URL.
+    # V509.09: the link copied for ChatGPT is a direct fresh full-JSON URL.
     # The short HTML final-report page still exists, but the copied link must
     # not require a separate file upload and must not use compact #r.
     return f'/api/diagnostics/live-audit/final-report-json-fresh/{APP_RELEASE}/{audit_key}/{run_id}/{nonce}'
@@ -8511,14 +8511,161 @@ def _v50902_issue_groups(rows: list[dict[str, Any]], limit: int = 10) -> list[di
     return [{'issue': k, 'count': v, 'example': examples.get(k)} for k, v in sorted(counts.items(), key=lambda x: (-x[1], x[0]))[:limit]]
 
 
-def _v50902_final_report_path_with_r(run: dict[str, Any], run_id: str, key: str | None = None) -> str:
-    """Return a short final-report URL.
 
-    V509.08 keeps the function name for compatibility with older call sites,
-    but deliberately does not append #r/snapshot fragments. Full JSON is now
-    embedded in the final-report HTML page and exposed through final-report-json.
+
+def _v50909_audit_fragment_text(value: Any, limit: int = 900) -> str:
+    text = re.sub(r'\s+', ' ', str(value or '')).strip()
+    return text[:max(20, int(limit or 900))]
+
+
+def _v50909_audit_fragment_row(row: Any) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        return {'value': _v50909_audit_fragment_text(row)}
+    out: dict[str, Any] = {}
+    for key in (
+        'caseIndex', 'excelRowNumber', 'excelId', 'id', 'name', 'ok',
+        'expectedNumericAnswer', 'expectedRawAnswer', 'actualAnswerNumber',
+        'actualAnswerNumberSource', 'actualAnswerLine', 'numericComparable',
+        'numericPassed', 'numericComparisonIssue', 'uiRenderPassed',
+        'frontendDomExpectedCheckOk', 'frontendDomResultMatchesApi',
+        'frontendDomAnswerMatchesApi', 'uiSolveButtonClicked', 'uiTaskInputFound',
+        'uiResultBoxFound', 'source', 'proofHash'
+    ):
+        if key in row:
+            out[key] = row.get(key)
+    if isinstance(row.get('issues'), list):
+        out['issues'] = [_v50909_audit_fragment_text(x, 260) for x in row.get('issues', [])[:8]]
+    if isinstance(row.get('suspiciousReasons'), list):
+        out['suspiciousReasons'] = [_v50909_audit_fragment_text(x, 240) for x in row.get('suspiciousReasons', [])[:8]]
+    for key, limit in (
+        ('inputPreview', 700), ('inputText', 700), ('resultPreview', 1400),
+        ('frontendDomResultPreview', 1000), ('frontendDomResultText', 1000),
+        ('uiResultBoxText', 1000), ('clientDisplayedResultText', 1000),
+        ('rawDeepSeekText', 1200), ('uiRenderIssues', 500)
+    ):
+        if key in row:
+            value = row.get(key)
+            if isinstance(value, list):
+                out[key] = [_v50909_audit_fragment_text(x, limit // 2) for x in value[:6]]
+            else:
+                out[key] = _v50909_audit_fragment_text(value, limit)
+    if isinstance(row.get('v501AiPipelineEvidence'), dict):
+        ev = row.get('v501AiPipelineEvidence') or {}
+        out['apiPipeline'] = {
+            'rawDeepSeekTextHash': ev.get('rawDeepSeekTextHash'),
+            'apiAnswerDecision': ev.get('apiAnswerDecision'),
+            'apiAnswerUsedAsPrimary': ev.get('apiAnswerUsedAsPrimary'),
+            'apiCandidateTrusted': ev.get('apiCandidateTrusted'),
+            'templateOverrodeTrustedApi': ev.get('templateOverrodeTrustedApi'),
+            'postprocessChangedAnswerNumber': ev.get('postprocessChangedAnswerNumber'),
+            'postprocessChangedResultText': ev.get('postprocessChangedResultText'),
+            'rawDeepSeekText': _v50909_audit_fragment_text(ev.get('rawDeepSeekText'), 1000),
+        }
+    return out
+
+
+def _v50909_issue_groups_for_fragment(rows: list[dict[str, Any]], limit: int = 20) -> list[dict[str, Any]]:
+    counts: dict[str, int] = {}
+    examples: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        issues = row.get('issues') if isinstance(row, dict) else None
+        if not isinstance(issues, list) or not issues:
+            issues = row.get('suspiciousReasons') if isinstance(row, dict) else None
+        if not isinstance(issues, list) or not issues:
+            issues = ['unknown issue']
+        for issue in issues[:4]:
+            key = _v50909_audit_fragment_text(issue, 260)
+            counts[key] = counts.get(key, 0) + 1
+            examples.setdefault(key, _v50909_audit_fragment_row(row))
+    return [{'issue': k, 'count': v, 'example': examples.get(k)} for k, v in sorted(counts.items(), key=lambda x: (-x[1], x[0]))[:limit]]
+
+
+def _v50909_compact_audit_payload(run: dict[str, Any], run_id: str, key: str | None = None) -> dict[str, Any]:
+    failures = [r for r in (run.get('failures') or []) if isinstance(r, dict)]
+    suspicious = [r for r in (run.get('suspiciousResults') or []) if isinstance(r, dict)]
+    evidence = [r for r in (run.get('evidenceResults') or []) if isinstance(r, dict)]
+    failed_like = [r for r in evidence if isinstance(r, dict) and not bool(r.get('ok', True))]
+    if not failures and failed_like:
+        failures = failed_like
+    payload = {
+        'transport': 'v50909-audit-payload-link',
+        'purpose': 'Self-contained audit proof summary. Use it when external fetch cannot read dynamic full JSON. Full JSON remains available through the URL before #audit and Download full JSON.',
+        'release': APP_RELEASE,
+        'solverVersion': SOLVER_VERSION,
+        'runId': run_id,
+        'auditKey': str(key or run.get('auditKey') or ''),
+        'status': run.get('status'),
+        'section': run.get('section'),
+        'offset': int(run.get('offset') or 0),
+        'limit': int(run.get('limit') or 0),
+        'planned': int(run.get('planned') or 0),
+        'completed': int(run.get('completed') or 0),
+        'passed': int(run.get('passed') or 0),
+        'failed': int(run.get('failed') or len(failures) or 0),
+        'finalAcceptance': bool(run.get('finalAcceptance') or run.get('acceptancePassed')),
+        'acceptancePassed': bool(run.get('acceptancePassed') or run.get('finalAcceptance')),
+        'acceptanceIssues': list(run.get('acceptanceIssues') or []),
+        'externalApiCalls': int(run.get('externalApiCalls') or 0),
+        'externalApiCompleted': int(run.get('externalApiCompleted') or 0),
+        'externalApiBlocked': int(run.get('externalApiBlocked') or 0),
+        'externalApiErrors': int(run.get('externalApiErrors') or 0),
+        'deepseekUsageProofs': int(run.get('deepseekUsageProofs') or 0),
+        'apiPromptTokens': int(run.get('apiPromptTokens') or 0),
+        'apiCompletionTokens': int(run.get('apiCompletionTokens') or 0),
+        'apiTotalTokens': int(run.get('apiTotalTokens') or 0),
+        'cachedResults': int(run.get('cachedResults') or 0),
+        'browserClientFetchCalls': int(run.get('browserClientFetchCalls') or 0),
+        'browserClientFetchCompleted': int(run.get('browserClientFetchCompleted') or 0),
+        'evidenceResultsCount': len(evidence),
+        'caseProofsTotal': int(run.get('caseProofsTotal') or len(evidence) or 0),
+        'numericComparableCount': int(run.get('numericComparableCount') or 0),
+        'numericPassedCount': int(run.get('numericPassedCount') or 0),
+        'numericFailedCount': int(run.get('numericFailedCount') or 0),
+        'numericSkippedCount': int(run.get('numericSkippedCount') or 0),
+        'uiDomProofs': int(run.get('uiDomProofs') or run.get('uiRenderDomProofs') or 0),
+        'uiResultBoxProofs': int(run.get('uiResultBoxProofs') or 0),
+        'uiSolveButtonClickProofs': int(run.get('uiSolveButtonClickProofs') or run.get('frontendUiClickedSolveButtonProofs') or 0),
+        'uiDomApiMatchProofs': int(run.get('uiDomApiMatchProofs') or 0),
+        'uiRenderPassedProofs': int(run.get('uiRenderPassedProofs') or 0),
+        'suspiciousCount': int(run.get('suspiciousCount') or len(suspicious) or 0),
+        'suspiciousPassedCount': int(run.get('suspiciousPassedCount') or 0),
+        'postprocessChangedAnswerNumberCount': int(run.get('v501PostprocessChangedAnswerNumberCount') or 0),
+        'postprocessChangedResultTextCount': int(run.get('v501PostprocessChangedResultTextCount') or 0),
+        'structuralOverrideCount': int(run.get('v501StructuralOverrideCount') or 0),
+        'templateOverrodeTrustedApiCount': int(run.get('v501TemplateOverrodeTrustedApiCount') or 0),
+        'apiProtectedFromTemplateOverrideCount': int(run.get('v501ApiProtectedFromTemplateOverrideCount') or 0),
+        'v501LearningCoverageCount': int(run.get('v501LearningCoverageCount') or 0),
+        'v501LearningCoverageRatio': run.get('v501LearningCoverageRatio'),
+        'failureIssueGroups': _v50909_issue_groups_for_fragment(failures),
+        'failuresTotal': len(failures),
+        'failures': [_v50909_audit_fragment_row(r) for r in failures[:30]],
+        'suspiciousTotal': len(suspicious),
+        'suspicious': [_v50909_audit_fragment_row(r) for r in suspicious[:30]],
+    }
+    return payload
+
+
+def _v50909_audit_fragment(payload: dict[str, Any]) -> str:
+    raw = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+    packed = zlib.compress(raw, 9)
+    return base64.urlsafe_b64encode(packed).decode('ascii').rstrip('=')
+
+def _v50902_final_report_path_with_r(run: dict[str, Any], run_id: str, key: str | None = None) -> str:
+    """Return the ChatGPT report URL.
+
+    V509.09 uses a two-layer transport: the URL before #audit is a direct
+    fresh full-JSON endpoint for browsers, while the #audit fragment carries a
+    self-contained acceptance/failure/suspicious proof summary. The fragment is
+    intentionally much smaller than the full JSON but includes all acceptance
+    blockers and all failure rows, so ChatGPT can proceed even when external
+    fetch cannot read dynamic server cache.
     """
-    return _browser_audit_final_report_path(run_id, key)
+    base_path = _browser_audit_final_report_path(run_id, key)
+    try:
+        payload = _v50909_compact_audit_payload(run, run_id, key)
+        return base_path + '#audit=' + _v50909_audit_fragment(payload)
+    except Exception:
+        return base_path
 
 
 
@@ -9170,7 +9317,7 @@ async def live_audit_browser_operator(request: Request, release_token: str, key_
 async def _v50906_build_full_final_report_payload(release_token: str, key_value: str, run_id_value: str):
     """Build the complete final-report JSON payload.
 
-    V509.08 keeps the operator-facing final-report URL short by rendering only
+    V509.09 keeps the operator-facing final-report URL short by rendering only
     an index page, but the full JSON is still available through raw/download and
     chunk endpoints. The compact/index payload is not an acceptance source.
     """
@@ -9290,7 +9437,7 @@ def _v50906_report_index_payload(full_payload: dict[str, Any], key_value: str, r
 async def live_audit_browser_final_report(release_token: str, key_value: str, run_id_value: str):
     """Short final-report URL: small HTML index + links to full JSON chunks.
 
-    V509.08 fixes the V509.04 problem where embedding the entire JSON in the
+    V509.09 fixes the V509.04 problem where embedding the entire JSON in the
     first HTML page made the report too large for external fetch. The main URL
     stays short and readable, while full JSON is available through manifest,
     chunk, raw-json, and download endpoints.
@@ -9358,7 +9505,7 @@ async def live_audit_browser_final_report_json(release_token: str, key_value: st
 async def live_audit_browser_final_report_json_fresh(release_token: str, key_value: str, run_id_value: str, nonce: str):
     """Fresh raw full JSON report for ChatGPT link-fetch.
 
-    V509.08 keeps the URL short but makes the copied report link a direct JSON
+    V509.09 keeps the URL short but makes the copied report link a direct JSON
     endpoint with a nonce in the path. This avoids compact #r summaries and
     reduces the chance that external fetch receives a cached/stale HTML report.
     """
@@ -9367,7 +9514,7 @@ async def live_audit_browser_final_report_json_fresh(release_token: str, key_val
         return payload
     payload = dict(payload)
     payload['freshRequestNonce'] = nonce
-    payload['diagnostic'] = 'live-audit-final-report-full-json-fresh-v50908'
+    payload['diagnostic'] = 'live-audit-final-report-full-json-fresh-v50909'
     payload['chatgptReportTransport'] = 'direct-full-json-fresh-url'
     return _json_ok(payload)
 
@@ -9380,7 +9527,7 @@ async def live_audit_browser_final_report_download_fresh(release_token: str, key
         return payload
     payload = dict(payload)
     payload['freshRequestNonce'] = nonce
-    payload['diagnostic'] = 'live-audit-final-report-download-fresh-v50908'
+    payload['diagnostic'] = 'live-audit-final-report-download-fresh-v50909'
     text = _v50906_json_text(payload)
     safe_run = re.sub(r'[^A-Za-z0-9_.-]+', '_', str(run_id_value or 'run'))[:160]
     headers = {
@@ -9550,7 +9697,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v509-08-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v509-09-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -9897,7 +10044,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v509-08-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v509-09-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:
