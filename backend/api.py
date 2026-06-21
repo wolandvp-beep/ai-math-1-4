@@ -186,7 +186,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('section', 'excel_numeric_regression'),
         ('offset', '100'),
         ('limit', '100'),
-        ('cacheBust', 'v510-05-v50103-excel-101-200-header-proof-fix'),
+        ('cacheBust', 'v510-06-v50103-excel-101-200-suspicious-dom-fix'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -264,7 +264,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v510-05-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v510-06-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3708,7 +3708,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v510-05-v50103-excel-101-200-header-proof-fix-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v510-06-v50103-excel-101-200-suspicious-dom-fix-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -4861,9 +4861,32 @@ def _live_audit_strict_format_issues(case: dict[str, Any], result_text: str, *, 
     return issues
 
 
+def _live_audit_user_visible_result_text(row: dict[str, Any]) -> str:
+    """Return the actual user-visible solution text for UI-render quality checks.
+
+    In browser UI-render audits the backend may still keep API/DeepSeek
+    `resultText` for proof comparison, while the accepted UI contract is the
+    DOM `#resultBox` text after `#taskInput` + `#solveBtn`.  V510.05 showed a
+    false `suspiciousPassed` on row 108: internal DeepSeek reasoning contained
+    structured/numbered wording, but the visible DOM line was correctly
+    unnumbered.  Suspicion checks for user-facing formatting must therefore use
+    the DOM text first.
+    """
+    if str(row.get('routeAuditMode') or '') == 'browser-client-ui-render-visible-network' or row.get('uiRenderAudit'):
+        for key in ('uiResultBoxText', 'frontendDomResultText', 'clientDisplayedResultText'):
+            value = row.get(key)
+            if value:
+                return str(value)
+    for key in ('resultText', 'resultPreview', 'uiResultBoxText', 'frontendDomResultText', 'clientDisplayedResultText'):
+        value = row.get(key)
+        if value:
+            return str(value)
+    return ''
+
+
 def _live_audit_suspicion_reasons(row: dict[str, Any]) -> list[str]:
     reasons: list[str] = []
-    result_text = str(row.get('resultText') or row.get('resultPreview') or '')
+    result_text = _live_audit_user_visible_result_text(row)
     low = result_text.lower().replace('ё', 'е')
     is_guard = _live_audit_row_is_guard(row)
     accepted_excel_fallback = _v40209_row_is_accepted_excel_local_fallback(row)
@@ -7138,9 +7161,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v510-05-v50103-excel-101-200-header-proof-fix',
+        'visibleResultContract': 'v510-06-v50103-excel-101-200-suspicious-dom-fix',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v510-05-v50103-excel-101-200-header-proof-fix',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v510-06-v50103-excel-101-200-suspicious-dom-fix',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -7920,7 +7943,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v510-05-v50103-excel-101-200-header-proof-fix'),
+        ('cacheBust', 'v510-06-v50103-excel-101-200-suspicious-dom-fix'),
     ])
     return {
         **summary,
@@ -8714,7 +8737,7 @@ def _v50902_final_report_path_with_r(run: dict[str, Any], run_id: str, key: str 
     base_path = _browser_audit_final_report_path(run_id, key)
     try:
         payload = _v50909_compact_audit_payload(run, run_id, key)
-        payload['transport'] = 'v51005-plain-json-fragment'
+        payload['transport'] = 'v51006-plain-json-fragment'
         payload['fragmentPurpose'] = 'Decode #json= with URL decoding. It is plain compact JSON, not zlib/base64.'
         raw = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
         return base_path + '#json=' + quote(raw, safe='')
@@ -9769,7 +9792,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v510-05-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v510-06-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -10116,7 +10139,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v510-05-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v510-06-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:
