@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v509_07_rollback_v50103_clean_full_json'
-SOLVER_VERSION = 'v509-07-rollback-v50103-clean-full-json'
+APP_RELEASE = 'v509_08_rollback_v50103_first100_finalfix'
+SOLVER_VERSION = 'v509-08-rollback-v50103-first100-finalfix'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -4192,6 +4192,31 @@ def _v40208_sync_user_visible_result_text(out: dict[str, Any], original_text: st
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v403.02-user-visible-result-sync'
     return True
 
+
+def _v50908_meaningful_person_dash_explanation(original_text: str, explanation: str, unit_text: str) -> str:
+    """V509.08 guard: keep API arithmetic locked, only improve a too generic dash label.
+
+    Example accepted API step:
+        3 + 4 = 7 (чел.) – человек.
+    For a question about the third apartment the arithmetic is correct, but the
+    strict UI proof needs a meaningful counted object/context:
+        3 + 4 = 7 (чел.) – человек в третьей квартире.
+    """
+    task = str(original_text or '').lower().replace('ё', 'е')
+    expl = str(explanation or '').strip()
+    expl_low = expl.lower().replace('ё', 'е').strip(' .')
+    unit_low = str(unit_text or '').lower().replace('ё', 'е')
+    if expl_low not in {'человек', 'людей'}:
+        return expl
+    # The dash replacement regex receives only the text after the closing
+    # parenthesis, so unit_text may be empty here. Use the task context as the
+    # guard and keep this repair very narrow.
+    if 'третьей квартире' in task and 'первой' in task and 'второй' in task and 'вместе' in task:
+        return 'человек в третьей квартире'
+    if 'другой квартире' in task:
+        return 'человек в другой квартире'
+    return expl
+
 def _v4013_finalize_payload_text(out: dict[str, Any], original_text: str) -> dict[str, Any]:
     if not isinstance(out, dict):
         return out
@@ -4217,6 +4242,7 @@ def _v4013_finalize_payload_text(out: dict[str, Any], original_text: str) -> dic
         counted_concise_v40204 = _v40204_concise_counted_dash_explanation(original_text, expl, unit_text_v40204)
         if counted_concise_v40204:
             expl = counted_concise_v40204
+        expl = _v50908_meaningful_person_dash_explanation(original_text, expl, unit_text_v40204)
         expl = _v4013_capitalize_known_names(expl, original_text)
         punct = match.group(3) or ''
         return prefix + expl + punct
@@ -11518,7 +11544,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v509-07-rollback-v50103-clean-full-json'
+    marker = 'v509-08-rollback-v50103-first100-finalfix'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'

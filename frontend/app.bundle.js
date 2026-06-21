@@ -1,5 +1,5 @@
 (() => {
-  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v509_07_rollback_v50103_clean_full_json";
+  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v509_08_rollback_v50103_first100_finalfix";
   // src/i18n/ru.js
   var ru = {
     "app.name": "\u041C\u0430\u0442\u0435\u043C\u0430\u0442\u0438\u0447\u043A\u0430",
@@ -1062,7 +1062,7 @@
     DEFAULT_LANGUAGE: "ru",
     ENABLE_DEMO_FALLBACK: true
   };
-  var EXPECTED_BACKEND_RELEASE = "v509_07_rollback_v50103_clean_full_json";
+  var EXPECTED_BACKEND_RELEASE = "v509_08_rollback_v50103_first100_finalfix";
 
   // src/storage/installIdStorage.js
   var KEY5 = "matematichka_install_id";
@@ -9168,8 +9168,8 @@
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const normBase = (value) => String(value || "").trim().replace(/\/+$/g, "");
       const backendBase = normBase(params.get("backendBaseUrl") || params.get("backend") || REMOTE_EXPLAIN_PROXY_URL.replace(/\/api\/explain.*$/i, ""));
-      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v509_07_rollback_v50103_clean_full_json");
-      const auditKey = String(params.get("auditKey") || params.get("key") || "v509-07-live-audit");
+      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v509_08_rollback_v50103_first100_finalfix");
+      const auditKey = String(params.get("auditKey") || params.get("key") || "v509-08-live-audit");
       const auditSection = String(params.get("section") || params.get("auditSection") || "excel_numeric_regression");
       const auditOffset = String(params.get("offset") || "0");
       const auditLimit = String(params.get("limit") || "100");
@@ -9598,12 +9598,15 @@
       function auditFullJsonDownloadUrl() {
         const url = String(el("auditFinalUrl")?.value || "").split("#")[0];
         if (!url) return "";
-        return url.replace("/final-report/", "/final-report-download/");
+        if (url.includes("/final-report-json-fresh/")) return url.replace("/final-report-json-fresh/", "/final-report-download-fresh/");
+        if (url.includes("/final-report-json/")) return url.replace("/final-report-json/", "/final-report-download/");
+        if (url.includes("/final-report/")) return url.replace("/final-report/", "/final-report-download/");
+        return url;
       }
       el("auditCopyBtn")?.addEventListener("click", async () => {
         const url = String(el("auditFinalUrl")?.value || "");
         if (!url) return setStatus("Итоговая ссылка ещё не готова", "bad");
-        try { await navigator.clipboard.writeText(url); setStatus("Ссылка скопирована. Для полного анализа скачайте full JSON и загрузите его в ChatGPT.", "ok"); }
+        try { await navigator.clipboard.writeText(url); setStatus("Ссылка скопирована: это fresh full JSON для ChatGPT. Файл нужен только если ссылка не читается.", "ok"); }
         catch { el("auditFinalUrl")?.select(); setStatus("Скопируйте выделенную ссылку вручную", "run"); }
       });
       el("auditDownloadJsonBtn")?.addEventListener("click", () => {
