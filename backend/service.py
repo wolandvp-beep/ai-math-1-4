@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v509_10_rollback_v50103_audit_payload_fix'
-SOLVER_VERSION = 'v509-10-rollback-v50103-audit-payload-fix'
+APP_RELEASE = 'v509_11_rollback_v50103_segment_object_fix'
+SOLVER_VERSION = 'v509-11-rollback-v50103-segment-object-fix'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -432,6 +432,11 @@ def _g1_one_operation_prompt(original_text: str) -> bool:
         r'\bх\s*[+\-−]\s*\d+\s*=\s*\d+\b',
         r'\b\d+\s*[-−]\s*x\s*=\s*\d+\b',
         r'\b\d+\s*[-−]\s*х\s*=\s*\d+\b',
+        # V509.11: segment-length comparison asks for one measured value, so
+        # explanatory pseudo-steps like «Синий отрезок: 1 см» must be collapsed.
+        r'\bкакова\s+длина\s+.+?отрезка\b',
+        r'\bчему\s+равна\s+длина\s+.+?отрезка\b',
+        r'\bдлина\s+.+?отрезка\s+\d+\s*см.*?на\s+\d+\s*см\s+(?:больше|меньше|длиннее|короче)',
     )
     return any(re.search(pattern, low) for pattern in simple_patterns)
 
@@ -4177,7 +4182,7 @@ def _v40208_sync_user_visible_result_text(out: dict[str, Any], original_text: st
     final_answer = str(out.get('final_answer') or structured.get('final_answer') or _v4011_answer_line(str(out.get('result') or '')) or '').strip().rstrip('.!?')
     if not steps or not final_answer:
         return False
-    visible_result = _v312_format_visible_result(steps, final_answer)
+    visible_result = _v312_format_visible_result(steps, final_answer, original_text)
     if not visible_result:
         return False
     old_visible = str(out.get('userVisibleResultText') or '').strip()
@@ -10674,10 +10679,28 @@ def _v500_answer_unit_and_info(original_text: str, fallback_unit: str = '') -> t
     if re.search(r'(?<!\d)\d+\s*см\b', low) and any(w in qlow for w in ('длина', 'отрезок', 'отрезка', 'отрезки', 'начерти')):
         unit = 'см'
         target = 'длина'
-        if 'красн' in low or 'красн' in qlow:
-            target = 'длина красного отрезка'
-        elif 'син' in low or 'син' in qlow:
-            target = 'длина синего отрезка'
+        # V509.11: choose the measured object from the question first, not from
+        # the first color mentioned in the condition.  Example:
+        # «синий 1 см, зелёный на 9 см больше; какова длина зелёного?» must
+        # produce «длина зелёного отрезка», while the number/action from API
+        # remains locked.
+        color_targets = (
+            ('зелен', 'длина зелёного отрезка'),
+            ('зелён', 'длина зелёного отрезка'),
+            ('красн', 'длина красного отрезка'),
+            ('син', 'длина синего отрезка'),
+            ('желт', 'длина жёлтого отрезка'),
+            ('жёлт', 'длина жёлтого отрезка'),
+        )
+        for stem, phrase in color_targets:
+            if stem in qlow:
+                target = phrase
+                break
+        else:
+            for stem, phrase in color_targets:
+                if stem in low:
+                    target = phrase
+                    break
         info = {**dict(info), 'unit': 'см', 'unitPhrase': 'см', 'tail': target, 'stepExplanation': target, 'measureProperty': 'длина', 'measureObject': target.replace('длина', '').strip(), 'isMeasure': True}
     # Keep «6 тысяч лет - 1 тысяча лет» in the same scale when the Excel/audit
     # expected answer is naturally «5 тысяч лет».
@@ -11023,7 +11046,7 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
     if not final:
         return None
     result = _format_primary_solution_text(original_text, repaired_steps, final)
-    visible = _v312_format_visible_result(repaired_steps, final)
+    visible = _v312_format_visible_result(repaired_steps, final, original_text)
     out = dict(payload)
     structured = {
         **_v4011_structured(out),
@@ -11502,7 +11525,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
     if conflict:
         return _v501_keep_trusted_api_payload(payload, original_text, api_candidate=api_candidate, template_candidate=template_candidate)
     result = _format_primary_solution_text(original_text, clean_steps, final_answer)
-    visible_result = _v312_format_visible_result(clean_steps, final_answer)
+    visible_result = _v312_format_visible_result(clean_steps, final_answer, original_text)
     out = dict(payload or {})
     structured = {
         **_v4011_structured(out),
@@ -11544,7 +11567,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v509-10-rollback-v50103-audit-payload-fix'
+    marker = 'v509-11-rollback-v50103-segment-object-fix'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -15696,9 +15719,12 @@ def _v312_count_arithmetic_actions(step: str) -> int:
     return len(re.findall(r'(?<=[0-9xх])\s*(?:[+\-−×*·:÷/])\s*(?=[0-9xх])', text, flags=re.IGNORECASE))
 
 
-def _v312_format_visible_result(steps: list[str], final_answer: str) -> str:
+def _v312_format_visible_result(steps: list[str], final_answer: str, original_text: str = '') -> str:
     raw_steps = [_v312_abbreviate_parenthetical_units(str(step or '').strip().rstrip('.')) for step in steps if str(step or '').strip()]
     clean_steps = [_v312_clean_step(step) for step in raw_steps if _v312_clean_step(step)]
+    if original_text:
+        clean_steps = _compact_semantic_single_operation_steps(original_text, clean_steps)
+        raw_steps = clean_steps[:]
     lines: list[str] = []
     raw_school_block = any(re.match(r'^(?:Способ\s+\d+|Нужно\s+|Ответ\s*:|\d+[\).]\s*)', step, flags=re.IGNORECASE) for step in raw_steps)
     single_direct_step_without_number = (
