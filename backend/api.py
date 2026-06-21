@@ -184,9 +184,9 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('release', APP_RELEASE),
         ('auditKey', audit_key),
         ('section', 'excel_numeric_regression'),
-        ('offset', '200'),
+        ('offset', '300'),
         ('limit', '100'),
-        ('cacheBust', 'v511-01-v50103-excel-201-300'),
+        ('cacheBust', 'v512-01-v50103-excel-301-400'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -204,7 +204,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         ('section', 'excel_numeric_regression'),
         ('key', audit_key),
         ('limit', '100'),
-        ('offset', '200'),
+        ('offset', '300'),
         ('allowExternal', '1'),
         ('maxExternalCalls', '150'),
         ('release', APP_RELEASE),
@@ -264,7 +264,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v511-01-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v512-01-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3708,7 +3708,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v511-01-v50103-excel-201-300-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v512-01-v50103-excel-301-400-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -7161,9 +7161,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v511-01-v50103-excel-201-300',
+        'visibleResultContract': 'v512-01-v50103-excel-301-400',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v511-01-v50103-excel-201-300',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v512-01-v50103-excel-301-400',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -7943,7 +7943,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v511-01-v50103-excel-201-300'),
+        ('cacheBust', 'v512-01-v50103-excel-301-400'),
     ])
     return {
         **summary,
@@ -9792,7 +9792,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v511-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v512-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -10139,7 +10139,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v511-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v512-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:
