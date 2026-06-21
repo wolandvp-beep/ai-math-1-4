@@ -10,6 +10,8 @@ import re
 import threading
 import time
 import zlib
+import mimetypes
+import zipfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode, unquote
@@ -18,7 +20,8 @@ from html import escape
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from backend.platform.modules.core.public.services.access.config import build_public_product_config
 from backend.platform.modules.core.public.services.access.service import (
@@ -32,6 +35,70 @@ from backend.diagnostic_audit import DEFAULT_AUDIT_CASES, _check_payload, _norma
 
 
 app = FastAPI()
+
+
+def _mount_self_hosted_frontend() -> None:
+    """Serve the bundled frontend from the backend host at /app/.
+
+    This makes the live UI-render audit independent from GitHub Pages: the
+    browser opens the exact frontend shipped in this release, fills #taskInput,
+    clicks #solveBtn, and reads #resultBox.
+    """
+    frontend_dir = Path(__file__).resolve().parent.parent / 'frontend'
+    if frontend_dir.is_dir():
+        try:
+            app.mount('/app', StaticFiles(directory=str(frontend_dir), html=True), name='self_hosted_frontend')
+            return
+        except RuntimeError:
+            return
+
+    assets_zip = Path(__file__).resolve().parent / 'frontend_assets.zip'
+    if not assets_zip.is_file():
+        return
+    if getattr(app.state, 'self_hosted_frontend_zip_routes', False):
+        return
+    app.state.self_hosted_frontend_zip_routes = True
+
+    def _read_frontend_asset(asset_path: str) -> tuple[bytes, str] | None:
+        normalized = str(asset_path or 'index.html').strip().lstrip('/')
+        if not normalized or normalized.endswith('/'):
+            normalized = 'index.html'
+        normalized = normalized.split('?', 1)[0].split('#', 1)[0]
+        if normalized not in {'index.html', 'app.bundle.js', 'styles.css'}:
+            normalized = 'index.html'
+        try:
+            with zipfile.ZipFile(assets_zip) as zf:
+                data = zf.read(normalized)
+        except Exception:
+            return None
+        media_type = mimetypes.guess_type(normalized)[0] or 'application/octet-stream'
+        if normalized.endswith('.js'):
+            media_type = 'application/javascript; charset=utf-8'
+        elif normalized.endswith('.css'):
+            media_type = 'text/css; charset=utf-8'
+        elif normalized.endswith('.html'):
+            media_type = 'text/html; charset=utf-8'
+        return data, media_type
+
+    @app.get('/app', include_in_schema=False)
+    @app.get('/app/', include_in_schema=False)
+    async def _self_hosted_frontend_zip_index() -> Response:
+        asset = _read_frontend_asset('index.html')
+        if asset is None:
+            return JSONResponse({'detail': 'Frontend asset not found'}, status_code=404)
+        data, media_type = asset
+        return Response(content=data, media_type=media_type, headers=NO_CACHE_HEADERS)
+
+    @app.get('/app/{asset_path:path}', include_in_schema=False)
+    async def _self_hosted_frontend_zip_asset(asset_path: str) -> Response:
+        asset = _read_frontend_asset(asset_path)
+        if asset is None:
+            return JSONResponse({'detail': 'Frontend asset not found'}, status_code=404)
+        data, media_type = asset
+        return Response(content=data, media_type=media_type, headers=NO_CACHE_HEADERS)
+
+
+_mount_self_hosted_frontend()
 _ACCESS_SERVICE: AccessService | None = None
 _ACCESS_SERVICE_STATE_PATH: str | None = None
 
@@ -85,29 +152,15 @@ def _public_base_url(request: Request | None = None) -> str:
     return raw
 
 
-def _public_frontend_url() -> str:
-    return (
-        os.environ.get('PUBLIC_FRONTEND_URL')
-        or os.environ.get('FRONTEND_PUBLIC_URL')
-        or 'https://wolandvp-beep.github.io/ai-math-1-4-frontend/'
-    ).strip().rstrip('/') + '/'
-
-
-
-
-def _public_frontend_url() -> str:
-    """Return deployed GitHub Pages frontend URL used by UI-render audit iframe."""
+def _public_frontend_url(request: Request | None = None) -> str:
     value = (
         os.environ.get('PUBLIC_FRONTEND_URL')
         or os.environ.get('FRONTEND_PUBLIC_URL')
-        or os.environ.get('GITHUB_PAGES_FRONTEND_URL')
-        or 'https://wolandvp-beep.github.io/ai-math-1-4-frontend/'
+        or ''
     ).strip()
-    if not value:
-        value = 'https://wolandvp-beep.github.io/ai-math-1-4-frontend/'
-    if not value.endswith('/'):
-        value += '/'
-    return value
+    if value:
+        return value.rstrip('/') + '/'
+    return _public_base_url(request).rstrip('/') + '/app/'
 
 
 def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str:
@@ -121,9 +174,9 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('section', 'excel_numeric_regression'),
         ('offset', '0'),
         ('limit', '100'),
-        ('cacheBust', 'v509-01-rollback-v50103-first100'),
+        ('cacheBust', 'v509-02-rollback-v50103-app-audit'),
     ])
-    return _public_frontend_url() + '?' + query
+    return _public_frontend_url(request) + '?' + query
 
 def _next_live_audit_links(request: Request | None = None, key: str | None = None) -> dict:
     audit_key = key or os.environ.get('LIVE_AUDIT_PUBLIC_HINT_KEY') or LIVE_PRODUCTION_AUDIT_DEFAULT_KEY
@@ -147,7 +200,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V509.01 — rollback to V501.03 architecture / batch 1–100 real external UI-render audit',
+        'nextAuditPlannedMapStep': 'V509.02 — rollback to V501.03 architecture / batch 1–100 real external UI-render audit',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -171,7 +224,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditEvidenceRequired': True,
         'nextAuditAcceptanceRule': 'Раздел принимать по batch final-report: finalAcceptance=true, status=done, completed=planned, failed=0, failures=0, evidence rows=planned, frontend DOM resultBox proof present, numericComparable rows have numericPassed=true; Excel short answer is only numeric expected, not visible final Ответ.',
         'nextAuditUserRunWorkflow': [
-            '1) Откройте nextAuditStartUrl в браузере: это frontend UI-render audit на GitHub Pages.',
+            '1) Откройте nextAuditStartUrl в браузере: это frontend UI-render audit на self-hosted /app.',
             '2) Нажмите одну кнопку: Запустить / продолжить UI-render аудит.',
             '3) Дождитесь статуса done/готово.',
             '4) Скопируйте одну ссылку: Итоговый отчёт для ChatGPT.',
@@ -182,7 +235,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditQueryOrderSafe': True,
         'nextAuditNoSectionEntityRisk': True,
         'nextAuditNoQueryParamReorderRisk': True,
-        'nextAuditNote': 'V509.01 запускает batch 1–100 через GitHub Pages frontend: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
+        'nextAuditNote': 'V509.02 запускает batch 1–100 через self-hosted /app frontend: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
     }
 
 
@@ -199,7 +252,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v509-01-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v509-02-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3643,7 +3696,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v509-01-rollback-v50103-first100-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v509-02-rollback-v50103-app-audit-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -7058,9 +7111,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v509-01-rollback-v50103-first100',
+        'visibleResultContract': 'v509-02-rollback-v50103-app-audit',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v509-01-rollback-v50103-first100',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v509-02-rollback-v50103-app-audit',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -7717,8 +7770,8 @@ def _browser_client_summary_payload(run: dict[str, Any], request: Request | None
         'completedCaseIndexes': completed_indexes,
         'completedCaseIds': [row.get('id') for row in (run.get('evidenceResults') or []) if isinstance(row, dict)],
         'casesRemaining': max(0, int(run.get('planned') or 0) - len(completed_indexes)),
-        'finalReportUrl': base + _v50901_final_report_path_with_r(run, run_id, key) if run_id else '',
-        'finalReportPath': _v50901_final_report_path_with_r(run, run_id, key) if run_id else '',
+        'finalReportUrl': base + _v50902_final_report_path_with_r(run, run_id, key) if run_id else '',
+        'finalReportPath': _v50902_final_report_path_with_r(run, run_id, key) if run_id else '',
     })
     return summary
 
@@ -7840,7 +7893,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v509-01-rollback-v50103-first100'),
+        ('cacheBust', 'v509-02-rollback-v50103-app-audit'),
     ])
     return {
         **summary,
@@ -7848,8 +7901,8 @@ def _browser_client_create_or_reuse_run(
         'casesToRun': cases_to_run,
         'summaryJsonPath': status_path,
         'summaryJsonUrl': _public_base_url(request) + status_path,
-        'finalReportPath': _v50901_final_report_path_with_r(run, run_id_value, key_value),
-        'finalReportUrl': _public_base_url(request) + _v50901_final_report_path_with_r(run, run_id_value, key_value),
+        'finalReportPath': _v50902_final_report_path_with_r(run, run_id_value, key_value),
+        'finalReportUrl': _public_base_url(request) + _v50902_final_report_path_with_r(run, run_id_value, key_value),
         'explainUrl': _public_base_url(request) + '/api/explain',
         'frontendAuditUrl': _public_frontend_url() + '?' + frontend_query,
         'frontendOrigin': _public_frontend_url().rstrip('/').split('/ai-math-1-4-frontend')[0],
@@ -8404,29 +8457,29 @@ def _browser_audit_final_report_path(run_id: str, key: str | None = None) -> str
     return f'/api/diagnostics/live-audit/final-report/{APP_RELEASE}/{audit_key}/{run_id}'
 
 
-def _v50901_tiny_text(value: Any, limit: int = 180) -> str:
+def _v50902_tiny_text(value: Any, limit: int = 180) -> str:
     text = re.sub(r'\s+', ' ', str(value or '')).strip()
     return text[:max(20, int(limit or 180))]
 
 
-def _v50901_tiny_row(row: Any) -> dict[str, Any]:
+def _v50902_tiny_row(row: Any) -> dict[str, Any]:
     if not isinstance(row, dict):
-        return {'value': _v50901_tiny_text(row)}
+        return {'value': _v50902_tiny_text(row)}
     out: dict[str, Any] = {}
     for key in ('caseIndex', 'excelRowNumber', 'excelId', 'id', 'name', 'expectedNumericAnswer', 'actualAnswerNumber', 'numericPassed', 'uiRenderPassed', 'proofHash'):
         if key in row:
             out[key] = row.get(key)
     if isinstance(row.get('issues'), list):
-        out['issues'] = [_v50901_tiny_text(x, 180) for x in row.get('issues', [])[:4]]
+        out['issues'] = [_v50902_tiny_text(x, 180) for x in row.get('issues', [])[:4]]
     if isinstance(row.get('suspiciousReasons'), list):
-        out['suspiciousReasons'] = [_v50901_tiny_text(x, 160) for x in row.get('suspiciousReasons', [])[:4]]
+        out['suspiciousReasons'] = [_v50902_tiny_text(x, 160) for x in row.get('suspiciousReasons', [])[:4]]
     for key, limit in (('inputPreview', 180), ('resultPreview', 260), ('actualAnswerLine', 140), ('numericComparisonIssue', 140)):
         if key in row:
-            out[key] = _v50901_tiny_text(row.get(key), limit)
+            out[key] = _v50902_tiny_text(row.get(key), limit)
     return out
 
 
-def _v50901_issue_groups(rows: list[dict[str, Any]], limit: int = 10) -> list[dict[str, Any]]:
+def _v50902_issue_groups(rows: list[dict[str, Any]], limit: int = 10) -> list[dict[str, Any]]:
     counts: dict[str, int] = {}
     examples: dict[str, dict[str, Any]] = {}
     for row in rows:
@@ -8436,13 +8489,13 @@ def _v50901_issue_groups(rows: list[dict[str, Any]], limit: int = 10) -> list[di
         if not isinstance(issues, list) or not issues:
             issues = ['unknown failure']
         for issue in issues[:3]:
-            key = _v50901_tiny_text(issue, 180)
+            key = _v50902_tiny_text(issue, 180)
             counts[key] = counts.get(key, 0) + 1
-            examples.setdefault(key, _v50901_tiny_row(row))
+            examples.setdefault(key, _v50902_tiny_row(row))
     return [{'issue': k, 'count': v, 'example': examples.get(k)} for k, v in sorted(counts.items(), key=lambda x: (-x[1], x[0]))[:limit]]
 
 
-def _v50901_final_report_path_with_r(run: dict[str, Any], run_id: str, key: str | None = None) -> str:
+def _v50902_final_report_path_with_r(run: dict[str, Any], run_id: str, key: str | None = None) -> str:
     path = _browser_audit_final_report_path(run_id, key)
     try:
         evidence_rows = _live_audit_results_for_payload(run, include_full=False)
@@ -8469,7 +8522,7 @@ def _v50901_final_report_path_with_r(run: dict[str, Any], run_id: str, key: str 
             'finalAcceptance': not acceptance_issues,
             'acceptancePassed': not acceptance_issues,
             'acceptanceIssuesCount': len(acceptance_issues),
-            'acceptanceIssues': [_v50901_tiny_text(x, 220) for x in acceptance_issues[:8]],
+            'acceptanceIssues': [_v50902_tiny_text(x, 220) for x in acceptance_issues[:8]],
             'externalApiCalls': int(run.get('externalApiCalls') or 0),
             'externalApiCompleted': int(run.get('externalApiCompleted') or 0),
             'externalApiErrors': int(run.get('externalApiErrors') or 0),
@@ -8488,13 +8541,13 @@ def _v50901_final_report_path_with_r(run: dict[str, Any], run_id: str, key: str 
             'uiRenderPassedProofs': len([r for r in evidence_rows if isinstance(r, dict) and _live_audit_ui_render_passed(r)]),
             'suspiciousCount': len(suspicious),
             'suspiciousPassedCount': len([r for r in suspicious if isinstance(r, dict) and r.get('ok')]),
-            'failureIssueGroups': _v50901_issue_groups(failures or numeric_failed or suspicious, limit=8),
+            'failureIssueGroups': _v50902_issue_groups(failures or numeric_failed or suspicious, limit=8),
             'failuresTotal': len(failures),
-            'failures': [_v50901_tiny_row(r) for r in failures[:8]],
+            'failures': [_v50902_tiny_row(r) for r in failures[:8]],
             'numericFailuresTotal': len(numeric_failed),
-            'numericFailures': [_v50901_tiny_row(r) for r in numeric_failed[:5]],
+            'numericFailures': [_v50902_tiny_row(r) for r in numeric_failed[:5]],
             'suspiciousTotal': len(suspicious),
-            'suspicious': [_v50901_tiny_row(r) for r in suspicious[:5]],
+            'suspicious': [_v50902_tiny_row(r) for r in suspicious[:5]],
             'fragmentEncoding': 'base64url(zlib(compact-json)); decode #r=',
         }
         raw = json.dumps(tiny, ensure_ascii=False, separators=(',', ':'), default=str).encode('utf-8')
@@ -8982,7 +9035,7 @@ def _browser_audit_operator_html(request: Request, payload: dict[str, Any], *, k
     technical_json = json.dumps(payload, ensure_ascii=False, indent=2)
     return f'''<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="robots" content="noindex"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V509.01 rollback V501.03 architecture UI-render live-аудит</title>
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><title>V509.02 rollback V501.03 architecture UI-render live-аудит</title>
 <style>
 body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;margin:28px auto;padding:0 16px;line-height:1.45;background:#f8fafc;color:#111827}}
 .box{{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:20px;margin:16px 0;box-shadow:0 8px 22px rgba(15,23,42,.05)}}
@@ -8990,10 +9043,10 @@ body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;ma
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px}}.metric{{background:#f3f4f6;border-radius:14px;padding:12px}}.metric b{{display:block;font-size:24px}}
 .bar{{height:18px;background:#e5e7eb;border-radius:999px;overflow:hidden}}.fill{{height:100%;width:{pct}%;background:#111827}}input{{box-sizing:border-box;width:100%;border:1px solid #d1d5db;border-radius:12px;padding:12px;font:15px ui-monospace,Menlo,monospace;background:#fff}}.muted{{color:#6b7280}}pre{{white-space:pre-wrap;background:#111827;color:#f9fafb;padding:14px;border-radius:14px;overflow:auto;max-height:360px}}
 </style></head><body>
-<h1>V509.01 — rollback V501.03 architecture UI-render audit</h1>
+<h1>V509.02 — rollback V501.03 architecture UI-render audit</h1>
 <section class="box">
   <h2>1. Открыть реальную frontend-страницу аудита</h2>
-  <p>V509.01 проверяет rollback-архитектуру V501.03 на Excel batch 1–100 через реальный production frontend: откроется GitHub Pages frontend, где будет одна кнопка «Запустить / продолжить аудит».</p>
+  <p>V509.02 проверяет rollback-архитектуру V501.03 на Excel batch 1–100 через реальный production frontend: откроется GitHub Pages frontend, где будет одна кнопка «Запустить / продолжить аудит».</p>
   <p><a class="primary" href="{escape(frontend_url, quote=True)}">Открыть аудит на frontend</a></p>
   <p class="muted">На frontend-странице аудит вводит задания в реальное поле <code>#taskInput</code>, нажимает реальную кнопку <code>#solveBtn</code>, ждёт <code>#resultBox</code> и сверяет DOM с API/expected.</p>
   <input readonly value="{escape(frontend_url, quote=True)}" onclick="this.select()">
@@ -9337,7 +9390,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v509-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v509-02-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -9684,7 +9737,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v509-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v509-02-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:
