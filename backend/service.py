@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v510_06_v50103_excel_101_200_suspicious_dom_fix'
-SOLVER_VERSION = 'v510-06-v50103-excel-101-200-suspicious-dom-fix'
+APP_RELEASE = 'v511_01_v50103_excel_201_300'
+SOLVER_VERSION = 'v511-01-v50103-excel-201-300'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -1784,7 +1784,7 @@ _V4011_UNIT_FORMS: dict[str, tuple[str, str, str]] = {
     'месяцев': ('месяц', 'месяца', 'месяцев'),
     'мес': ('мес.', 'мес.', 'мес.'),
     'мес.': ('мес.', 'мес.', 'мес.'),
-    # V402.02: extra nouns from Excel rows 101-200.  They let the
+    # V402.02: extra nouns from Excel rows 201-300.  They let the
     # visible answer agree grammatically while numeric regression still
     # compares only the main number.
     'ученик': ('ученик', 'ученика', 'учеников'),
@@ -3764,7 +3764,7 @@ def _v4011_build_final_answer(original_text: str, number: int, info: dict[str, s
         return f'{tail_for_answer} {number} {_v4011_plural(number, unit or unit_phrase)}{suffix}'.strip()
 
     # V402.02: full natural counted-object answers for common unknown-part
-    # questions in the 101-200 batch.  These run before preserving a current
+    # questions in the 201-300 batch.  These run before preserving a current
     # answer, because DeepSeek often returns numeric-short-but-readable forms.
     if not bool(info.get('isMeasure')):
         qlow = _v4015_last_question_sentence(original_text).lower().replace('ё', 'е')
@@ -11567,7 +11567,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v510-06-v50103-excel-101-200-suspicious-dom-fix'
+    marker = 'v511-01-v50103-excel-201-300'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -12662,7 +12662,7 @@ async def _generate_deepseek_primary_response(payload: str, *, allow_external: b
         })
     ai_payload = None
     last_deepseek_exception: Exception | None = None
-    # V510.05: a transient empty/error DeepSeek response must not immediately
+    # V511.01: a transient empty/error DeepSeek response must not immediately
     # downgrade a normal audit row to local fallback.  Retry the full primary
     # API pipeline a few times; if any attempt produces a verified result, that
     # result remains the locked source of truth for number and actions.
