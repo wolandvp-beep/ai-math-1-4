@@ -186,7 +186,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('section', 'excel_numeric_regression'),
         ('offset', '0'),
         ('limit', '100'),
-        ('cacheBust', 'v509-11-rollback-v50103-segment-object-fix'),
+        ('cacheBust', 'v509-13-v50103-finalreport-compact-json'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -264,7 +264,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v509-11-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v509-13-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3708,7 +3708,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v509-11-rollback-v50103-segment-object-fix-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v509-13-v50103-finalreport-compact-json-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -7123,9 +7123,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v509-11-rollback-v50103-segment-object-fix',
+        'visibleResultContract': 'v509-13-v50103-finalreport-compact-json',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v509-11-rollback-v50103-segment-object-fix',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v509-13-v50103-finalreport-compact-json',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -7905,7 +7905,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v509-11-rollback-v50103-segment-object-fix'),
+        ('cacheBust', 'v509-13-v50103-finalreport-compact-json'),
     ])
     return {
         **summary,
@@ -8466,12 +8466,10 @@ async def live_audit_browser_client_status(request: Request, release_token: str,
 
 def _browser_audit_final_report_path(run_id: str, key: str | None = None) -> str:
     audit_key = str(key or LIVE_PRODUCTION_AUDIT_DEFAULT_KEY).strip()
-    nonce = _live_audit_fresh_nonce()
-    # V509.10: the link copied for ChatGPT is a direct fresh full-JSON URL.
-    # The short HTML final-report page still exists, but the copied link must
-    # not require a separate file upload and must not use compact #r.
-    return f'/api/diagnostics/live-audit/final-report-json-fresh/{APP_RELEASE}/{audit_key}/{run_id}/{nonce}'
-
+    # V509.13: restore V501.03 report transport. The copied URL is the
+    # ordinary path-based final-report endpoint, which returns compact JSON
+    # directly: acceptance + failures + suspicious + compact case proofs.
+    return f'/api/diagnostics/live-audit/final-report/{APP_RELEASE}/{audit_key}/{run_id}'
 
 def _v50902_tiny_text(value: Any, limit: int = 180) -> str:
     text = re.sub(r'\s+', ' ', str(value or '')).strip()
@@ -9469,28 +9467,46 @@ def _v50906_report_index_payload(full_payload: dict[str, Any], key_value: str, r
 
 @app.get('/api/diagnostics/live-audit/final-report/{release_token}/{key_value}/{run_id_value}')
 async def live_audit_browser_final_report(release_token: str, key_value: str, run_id_value: str):
-    """Short final-report URL: small HTML index + links to full JSON chunks.
+    """V501.03-style compact machine-readable final report.
 
-    V509.09 fixes the V509.04 problem where embedding the entire JSON in the
-    first HTML page made the report too large for external fetch. The main URL
-    stays short and readable, while full JSON is available through manifest,
-    chunk, raw-json, and download endpoints.
+    This route intentionally returns JSON directly, not HTML, not #audit and
+    not a fresh cache endpoint. It is the transport used by V501.03: the single
+    final-report URL contains acceptance, failures, suspicious rows and compact
+    case proofs, with links to full proof endpoints for deeper inspection.
+    Solver/formatter architecture is not changed here.
     """
-    full_payload = await _v50906_build_full_final_report_payload(release_token, key_value, run_id_value)
-    if isinstance(full_payload, JSONResponse):
-        return full_payload
-    index_payload = _v50906_report_index_payload(full_payload, key_value, run_id_value)
-    chunk0 = index_payload.get('chunkEndpoints', [''])[0] if index_payload.get('chunkEndpoints') else ''
-    return _html_ok(_audit_dashboard_html(
-        'Live audit FINAL report index + full JSON chunks',
-        index_payload,
-        extra_links=[
-            ('Open manifest with chunk list', str(index_payload.get('manifestEndpoint') or '')),
-            ('Open chunk 0 of full JSON', str(chunk0 or '')),
-            ('Open raw FULL JSON endpoint', str(index_payload.get('fullJsonEndpoint') or '')),
-            ('Download full JSON file', str(index_payload.get('downloadEndpoint') or '')),
-        ],
-    ))
+    report = await live_audit_runner_report(key=key_value, runId=run_id_value, release=release_token)
+    if isinstance(report, JSONResponse):
+        return report
+    failures = await live_audit_runner_failures(key=key_value, runId=run_id_value, release=release_token, limit=200)
+    suspicious = await live_audit_runner_suspicious(key=key_value, runId=run_id_value, release=release_token)
+    acceptance = await live_audit_runner_acceptance(key=key_value, runId=run_id_value, release=release_token)
+    results_compact = await live_audit_runner_results(key=key_value, runId=run_id_value, release=release_token, includeFull=0, limit=200, offset=0)
+    for item in (failures, suspicious, acceptance, results_compact):
+        if isinstance(item, JSONResponse):
+            return item
+    payload = {
+        **dict(report),
+        'diagnostic': 'live-audit-browser-final-report-compact-json-v50103-restored',
+        'finalReportFormat': 'compact-json-v50103-restored',
+        'singleLinkForChatGPT': True,
+        'operatorInstruction': 'Скопируйте URL этой страницы и пришлите ChatGPT. Это V501.03 compact JSON: acceptance, failures, suspicious и compact case proofs. Полные proof endpoints остаются в ссылках ниже.',
+        'compactReportReason': 'V509.13 restores the V501.03 direct JSON final-report transport; no fresh cache URL, no #audit, no #json fragment.',
+        'fullResultsPayloadOmitted': True,
+        'evidencePayloadOmitted': True,
+        'failuresPayload': failures,
+        'suspiciousPayload': suspicious,
+        'acceptancePayload': acceptance,
+        'compactResultsPayload': results_compact,
+        'fullProofEndpoints': {
+            'resultsFullRun': f'/api/diagnostics/live-audit/results-full-run/{APP_RELEASE}/{key_value}/{run_id_value}',
+            'evidenceRun': f'/api/diagnostics/live-audit/evidence-run/{APP_RELEASE}/{key_value}/{run_id_value}',
+            'failuresRun': f'/api/diagnostics/live-audit/failures-run/{APP_RELEASE}/{key_value}/{run_id_value}',
+            'suspiciousRun': f'/api/diagnostics/live-audit/suspicious-run/{APP_RELEASE}/{key_value}/{run_id_value}',
+            'acceptanceRun': f'/api/diagnostics/live-audit/acceptance-run/{APP_RELEASE}/{key_value}/{run_id_value}',
+        },
+    }
+    return _json_ok(payload)
 
 
 @app.get('/api/diagnostics/live-audit/final-report-manifest/{release_token}/{key_value}/{run_id_value}')
@@ -9731,7 +9747,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v509-11-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v509-13-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -10078,7 +10094,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v509-11-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v509-13-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:
