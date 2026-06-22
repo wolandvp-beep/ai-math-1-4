@@ -186,7 +186,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('section', 'excel_numeric_regression'),
         ('offset', '1300'),
         ('limit', '100'),
-        ('cacheBust', 'v522-01-v50103-excel-1301-1400'),
+        ('cacheBust', 'v522-02-v50103-excel-1301-1400'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -212,7 +212,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V518.01 — V501.03 architecture / batch 1301–1400 real external UI-render audit',
+        'nextAuditPlannedMapStep': 'V522.02 — V501.03 architecture / batch 1301–1400 real external UI-render audit',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -247,7 +247,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditQueryOrderSafe': True,
         'nextAuditNoSectionEntityRisk': True,
         'nextAuditNoQueryParamReorderRisk': True,
-        'nextAuditNote': 'V522.01 запускает batch 1301–1400 через self-hosted /app frontend: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
+        'nextAuditNote': 'V522.02 запускает batch 1301–1400 через self-hosted /app frontend: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
     }
 
 
@@ -264,7 +264,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v522-01-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v522-02-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3738,7 +3738,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v522-01-v50103-excel-1301-1400-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v522-02-v50103-excel-1301-1400-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -4424,6 +4424,11 @@ def _live_audit_excel_visible_unit_explanation_issues(case: dict[str, Any], resu
             return 'person'
         if re.search(r'скольк(?:о|их|ими)?\s+(?:всего\s+)?(?:человек|человека|людей|дошкольник|дошкольника|дошкольников|школьник|школьника|школьников|студент|студента|студентов|гребец|гребца|гребцов|взрослый|взрослого|взрослых|жильц|жильца|жильцов|мальчик|мальчика|мальчиков|девочк|девочки|девочек|детей|ребят|ученик|ученика|учеников|взрослый|взрослого|взрослых|отличник|отличника|отличников)\b', _q_v40502):
             return 'person'
+        # V522.02: Excel may contain a wrong raw noun (e.g. row 1332 says
+        # "25 детей" while the task asks for деталей). Prefer the question
+        # target before falling back to the noisy Excel answer noun.
+        if re.search(r'скольк(?:о|их|ими)?\s+(?:всего\s+)?(?:детал(?:ей|и|ь|я)?|кубик(?:ов|а)?|лист(?:ов|а)?|квартир(?:а|ы)?|билет(?:ов|а)?|перчат(?:ок|ки)?|пар(?:ы)?|команд(?:ы)?|вед(?:ер|ра|ро)|вёд(?:ер|ра|ро)|носк(?:ов|а)?)\b', _q_v40502):
+            return 'piece'
         m = re.search(r'(?<!\d)-?\d+(?:[,.]\d+)?\s+([а-яёa-z.]+)', raw_answer, flags=re.IGNORECASE)
         if not m:
             return ''
@@ -4486,8 +4491,9 @@ def _live_audit_excel_visible_unit_explanation_issues(case: dict[str, Any], resu
             break
         unit_match = re.search(r'=\s*-?\d+(?:[,.]\d+)?\s*\(([^)]+)\)\s*[—–-]', clean)
         unit_text = str(unit_match.group(1) if unit_match else '').lower().replace('ё', 'е')
-        measurement_unit_ok = bool(re.search(r'^(?:кг|г|т|л|м|см|дм|мм|км|руб\.?|коп\.?|д\.?|дн\.?|нед\.?|мес\.?|раза?|м/с|км/ч|ц)$', unit_text.strip()))
-        if count_unit_kind == 'piece' and 'шт' not in unit_text and not measurement_unit_ok:
+        measurement_unit_ok = bool(re.search(r'^(?:кг|г|т|л|м|см|дм|мм|км|руб\.?|коп\.?|мин\.?|ч\.?|час(?:а|ов)?|д\.?|дн\.?|нед\.?|мес\.?|раза?|м/с|км/ч|ц)$', unit_text.strip()))
+        intermediate_person_unit_ok = bool(re.search(r'чел|человек', unit_text))
+        if count_unit_kind == 'piece' and 'шт' not in unit_text and not measurement_unit_ok and not intermediate_person_unit_ok:
             issues.append('strict proof: counted objects must use (шт.) or (тыс. шт.) in visible calculation parentheses')
             break
         if count_unit_kind == 'person' and not re.search(r'чел|человек', unit_text):
@@ -7022,7 +7028,7 @@ def _api_v52101_batch_1201_1300_canonicalize_response(original_text: str, payloa
 def _api_v52201_batch_1301_1400_canonicalize_response(original_text: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
     """Route-level final visible guard for Excel rows 1301-1400.
 
-    V522.01 advances the Excel numeric regression to rows 1301-1400.  The guard
+    V522.02 advances the Excel numeric regression to rows 1301-1400.  The guard
     runs after generic V401/V501 repairs, so browser DOM proof receives the
     deterministic visible contract while DeepSeek/API usage evidence remains
     attached to the payload.  Excel is not used to overwrite trusted API
@@ -7041,7 +7047,7 @@ def _api_v52201_batch_1301_1400_canonicalize_response(original_text: str, payloa
     fixed['userVisibleResultText'] = str(fixed.get('result') or '')
     fixed['explanation'] = str(fixed.get('result') or '')
     contract = str(fixed.get('visibleResultContract') or '').strip()
-    marker = 'v522.01-route-final-batch-1301-1400-visible-guard'
+    marker = 'v522.02-route-final-batch-1301-1400-visible-guard'
     if marker not in contract:
         fixed['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     verifier = str(fixed.get('verifier') or '').strip()
@@ -8339,7 +8345,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v522-01-v50103-excel-1301-1400'),
+        ('cacheBust', 'v522-02-v50103-excel-1301-1400'),
     ])
     return {
         **summary,
@@ -10188,7 +10194,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v522-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v522-02-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -10535,7 +10541,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v522-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v522-02-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:

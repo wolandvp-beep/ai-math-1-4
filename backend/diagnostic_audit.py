@@ -140,6 +140,11 @@ def _excel_visible_step_unit_explanation_issues(case: dict[str, Any], result: st
             return 'person'
         if re.search(r'скольк(?:о|их|ими)?\s+(?:всего\s+)?(?:человек|человека|людей|дошкольник|дошкольника|дошкольников|школьник|школьника|школьников|студент|студента|студентов|гребец|гребца|гребцов|жильц|жильца|жильцов|мальчик|мальчика|мальчиков|девочк|девочки|девочек|детей|ребят|ученик|ученика|учеников|взрослый|взрослого|взрослых|отличник|отличника|отличников)\b', _q_v40502):
             return 'person'
+        # V522.02: Excel may contain a wrong raw noun (e.g. row 1332 says
+        # "25 детей" while the task asks for деталей). Prefer the question
+        # target before falling back to the noisy Excel answer noun.
+        if re.search(r'скольк(?:о|их|ими)?\s+(?:всего\s+)?(?:детал(?:ей|и|ь|я)?|кубик(?:ов|а)?|лист(?:ов|а)?|квартир(?:а|ы)?|билет(?:ов|а)?|перчат(?:ок|ки)?|пар(?:ы)?|команд(?:ы)?|вед(?:ер|ра|ро)|вёд(?:ер|ра|ро)|носк(?:ов|а)?)\b', _q_v40502):
+            return 'piece'
         m = re.search(r'(?<!\d)-?\d+(?:[,.]\d+)?\s+([а-яёa-z.]+)', raw_answer, flags=re.IGNORECASE)
         if not m:
             return ''
@@ -304,8 +309,9 @@ def _excel_visible_step_unit_explanation_issues(case: dict[str, Any], result: st
             break
         unit_match = re.search(r'=\s*-?\d+(?:[,.]\d+)?\s*\(([^)]+)\)\s*[—–-]', line)
         unit_text = str(unit_match.group(1) if unit_match else '').lower().replace('ё', 'е')
-        measurement_unit_ok = bool(re.search(r'^(?:кг|г|т|л|м|см|дм|мм|км|руб\.?|коп\.?|д\.?|дн\.?|нед\.?|мес\.?|раза?|м/с|км/ч|ц)$', unit_text.strip()))
-        if count_unit_kind == 'piece' and 'шт' not in unit_text and not measurement_unit_ok:
+        measurement_unit_ok = bool(re.search(r'^(?:кг|г|т|л|м|см|дм|мм|км|руб\.?|коп\.?|мин\.?|ч\.?|час(?:а|ов)?|д\.?|дн\.?|нед\.?|мес\.?|раза?|м/с|км/ч|ц)$', unit_text.strip()))
+        intermediate_person_unit_ok = bool(re.search(r'чел|человек', unit_text))
+        if count_unit_kind == 'piece' and 'шт' not in unit_text and not measurement_unit_ok and not intermediate_person_unit_ok:
             issues.append('Excel numeric regression: counted objects must use (шт.) or (тыс. шт.) in visible calculation parentheses')
             break
         if count_unit_kind == 'person' and not re.search(r'чел|человек', unit_text):
