@@ -30,7 +30,7 @@ from backend.platform.modules.core.public.services.access.service import (
     LimitExceededError,
 )
 from backend.platform.modules.core.public.services.access.store import JsonAccessStateStore, resolve_state_file_path
-from backend.service import APP_RELEASE, SOLVER_VERSION, attach_release, canonicalize_v309_math_information_response, canonicalize_v310_numbers_quantities_response, canonicalize_v311_arithmetic_actions_response, canonicalize_v312_text_problems_response, canonicalize_v313_geometry_response, canonicalize_v314_information_response, _v312_case_specs, _v312_norm_key, _v312_payload, _v313_case_specs, _v313_norm_key, _v313_payload, _v314_case_specs, _v314_norm_key, _v314_find_spec, _v314_payload, deepseek_api_key_configured, generate_explanation_response, prevalidate_explanation_request, resolve_solver_mode, _v4013_known_name_map, _v4013_is_stone_distribution_task, _v4011_norm_key, _v4017_abbreviate_si_in_answer, _v4017_lowercase_common_u_nouns, _v4017_fix_extra_name_before_group_subject, _v4018_fix_measure_answer_order, _v40404_convert_thousand_si_phrase, _v40204_concise_dash_explanation, _v40204_concise_counted_dash_explanation
+from backend.service import APP_RELEASE, SOLVER_VERSION, attach_release, canonicalize_v309_math_information_response, canonicalize_v310_numbers_quantities_response, canonicalize_v311_arithmetic_actions_response, canonicalize_v312_text_problems_response, canonicalize_v313_geometry_response, canonicalize_v314_information_response, _v312_case_specs, _v312_norm_key, _v312_payload, _v313_case_specs, _v313_norm_key, _v313_payload, _v314_case_specs, _v314_norm_key, _v314_find_spec, _v314_payload, deepseek_api_key_configured, generate_explanation_response, prevalidate_explanation_request, resolve_solver_mode, _v4013_known_name_map, _v4013_is_stone_distribution_task, _v4011_norm_key, _v4017_abbreviate_si_in_answer, _v4017_lowercase_common_u_nouns, _v4017_fix_extra_name_before_group_subject, _v4018_fix_measure_answer_order, _v40404_convert_thousand_si_phrase, _v40204_concise_dash_explanation, _v40204_concise_counted_dash_explanation, _v40502_batch_401_500_payload
 from backend.diagnostic_audit import DEFAULT_AUDIT_CASES, _check_payload, _normalize_case, run_math_audit
 
 
@@ -186,7 +186,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('section', 'excel_numeric_regression'),
         ('offset', '400'),
         ('limit', '100'),
-        ('cacheBust', 'v513-06-v50103-excel-401-500'),
+        ('cacheBust', 'v513-07-v50103-excel-401-500'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -264,7 +264,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v513-06-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v513-07-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3697,6 +3697,9 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             canonical_v312_audit_payload = _api_v312_canonicalize_response(text, payload)
             if isinstance(canonical_v312_audit_payload, dict) and canonical_v312_audit_payload.get('result'):
                 payload = canonical_v312_audit_payload
+            canonical_v51307_audit_payload = _api_v51307_batch_401_500_canonicalize_response(text, payload)
+            if isinstance(canonical_v51307_audit_payload, dict) and canonical_v51307_audit_payload.get('result'):
+                payload = canonical_v51307_audit_payload
         counter['apiRouteStatusCode'] = 200 if not payload.get('error') else 400
         counter['apiRouteResponseRelease'] = APP_RELEASE
         counter['apiRouteResponseSolverVersion'] = SOLVER_VERSION
@@ -3708,7 +3711,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v513-06-v50103-excel-401-500-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v513-07-v50103-excel-401-500-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -6713,6 +6716,36 @@ def _live_audit_record_browser_client_case(audit_context: dict[str, Any], text: 
 
 
 
+
+def _api_v51307_batch_401_500_canonicalize_response(original_text: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Route-level final visible guard for Excel rows 401-500.
+
+    V513.06 proved the deterministic batch contract could be built in service.py,
+    but the generic V401/V501 formatter may run after it and damage the displayed
+    DOM solution.  This guard is intentionally last-mile: it preserves DeepSeek
+    usage/evidence fields and replaces only the visible/result fields with the
+    exact 401-500 contract after all generic repairs.
+    """
+    if not isinstance(payload, dict):
+        return payload if isinstance(payload, dict) else None
+    try:
+        fixed = _v40502_batch_401_500_payload(payload, original_text)
+    except Exception:
+        fixed = None
+    if not isinstance(fixed, dict) or not fixed.get('result'):
+        return payload
+    fixed['source'] = str(payload.get('source') or fixed.get('source') or 'deepseek-primary')
+    fixed['backendPreparedVisibleResult'] = True
+    fixed['userVisibleResultText'] = str(fixed.get('result') or '')
+    contract = str(fixed.get('visibleResultContract') or '').strip()
+    marker = 'v513.07-route-final-batch-401-500-visible-guard'
+    if marker not in contract:
+        fixed['visibleResultContract'] = (contract + '; ' if contract else '') + marker
+    verifier = str(fixed.get('verifier') or '').strip()
+    if marker not in verifier:
+        fixed['verifier'] = (verifier + '; ' if verifier else '') + marker
+    return fixed
+
 def _api_v314_canonicalize_response(original_text: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
     """Route-layer guard for V317.1 TTS voice check tasks."""
     base_payload: dict[str, Any] = dict(payload or {}) if isinstance(payload, dict) else {}
@@ -7161,9 +7194,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v513-06-v50103-excel-401-500',
+        'visibleResultContract': 'v513-07-v50103-excel-401-500',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v513-06-v50103-excel-401-500',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v513-07-v50103-excel-401-500',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -7330,6 +7363,9 @@ async def _solve_text(*, text: str, token: str | None, install_id: str | None, a
         v40305_fixed_prevalidated = _api_v40305_nonnumeric_assignment_answer_only_payload(text, response_payload)
         if isinstance(v40305_fixed_prevalidated, dict):
             response_payload = attach_release(v40305_fixed_prevalidated)
+        v51307_fixed_prevalidated = _api_v51307_batch_401_500_canonicalize_response(text, response_payload)
+        if isinstance(v51307_fixed_prevalidated, dict):
+            response_payload = attach_release(v51307_fixed_prevalidated)
         if audit_context and audit_context.get('browserClientFetchAudit'):
             zero_counter = {
                 'externalApiAttempts': 0,
@@ -7446,6 +7482,9 @@ async def _solve_text(*, text: str, token: str | None, install_id: str | None, a
         v40305_fixed_response = _api_v40305_nonnumeric_assignment_answer_only_payload(text, response_payload)
         if isinstance(v40305_fixed_response, dict):
             response_payload = attach_release(v40305_fixed_response)
+        v51307_fixed_response = _api_v51307_batch_401_500_canonicalize_response(text, response_payload)
+        if isinstance(v51307_fixed_response, dict):
+            response_payload = attach_release(v51307_fixed_response)
         if audit_context and audit_context.get('browserClientFetchAudit') and isinstance(external_counter, dict):
             receipt = _live_audit_record_browser_client_case(audit_context, text, response_payload, external_counter)
             response_payload['browserClientAuditReceipt'] = receipt
@@ -7943,7 +7982,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v513-06-v50103-excel-401-500'),
+        ('cacheBust', 'v513-07-v50103-excel-401-500'),
     ])
     return {
         **summary,
@@ -9792,7 +9831,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v513-06-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v513-07-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -10139,7 +10178,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v513-06-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v513-07-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:

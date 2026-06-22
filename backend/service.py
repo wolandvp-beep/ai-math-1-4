@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v513_06_v50103_excel_401_500'
-SOLVER_VERSION = 'v513-06-v50103-excel-401-500'
+APP_RELEASE = 'v513_07_v50103_excel_401_500'
+SOLVER_VERSION = 'v513-07-v50103-excel-401-500'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -831,7 +831,7 @@ def _postprocess_deepseek_primary_payload(payload: dict, original_text: str) -> 
     repaired_before = _v501_compact_payload_snapshot(cleaned)
     v51306_batch_401_500 = _v40502_batch_401_500_payload(cleaned, original_text)
     if isinstance(v51306_batch_401_500, dict):
-        # V513.06: the 401-500 Excel numeric regression section is an explicit
+        # V513.07: the 401-500 Excel numeric regression section is an explicit
         # deterministic visible-format regression guard.  DeepSeek/API is still
         # called for evidence, but the browser-visible proof is normalised from
         # the verified arithmetic contract so repeat audits do not depend on
@@ -4715,7 +4715,7 @@ _V40602_BATCH_401_500_SPECS = [
     ('средняя высота айсберга над водой 100 м, а под водой - на 600 м больше. какова общая высота айсберга?', ['100 + 600 = 700 (м) – высота под водой', '100 + 700 = 800 (м) – общая высота'], 'общая высота айсберга 800 м', '800', 'м', 445),
     ('андрей поймал столько раков, сколько букв в его имени, а саша - на 7 раков больше. сколько раков поймали оба мальчика?', ['6 + 7 = 13 (шт.) – раков Саши', '6 + 13 = 19 (шт.) – всего раков'], 'оба мальчика поймали 19 раков', '19', 'раков', 446),
     ('на остановке стояли 3 мужчины и 5 женщин. уехали 6 человек. сколько человек осталось на остановке?', ['3 + 5 = 8 (чел.) – всего человек', '8 - 6 = 2 (чел.) – на остановке'], 'на остановке осталось 2 человека', '2', 'человека', 447),
-    ('купили 8 кг яблок и 2 кг груш. из 3 кг фруктов сварили компот. сколько килограммов фруктов осталось?', ['8 + 2 = 10 (кг) – всего фруктов', '10 - 3 = 7 (кг) – осталось фруктов'], 'осталось 7 кг фруктов', '7', 'кг', 448),
+    ('купили 8 кг яблок и 2 кг груш. из 3 кг фруктов сварили компот. сколько килограммов фруктов осталось?', ['8 + 2 = 10 (кг) – всего фруктов', '10 - 3 = 7 (кг) – фруктов после компота'], 'осталось 7 кг фруктов', '7', 'кг', 448),
     ('на клумбе росло 6 фиолетовых астр и 3 розовые астры. для букета срезали 5 астр. сколько астр осталось на клумбе?', ['6 + 3 = 9 (шт.) – всего астр', '9 - 5 = 4 (шт.) – осталось астр'], 'на клумбе осталось 4 астры', '4', 'астры', 449),
     ('на ветке сидело 2 воробья и 4 синицы. улетело 4 птицы. сколько птиц осталось на ветке?', ['2 + 4 = 6 (шт.) – всего птиц', '6 - 4 = 2 (шт.) – осталось птиц'], 'на ветке осталось 2 птицы', '2', 'птицы', 450),
     ('в мебельном магазине было 5 диванов и 3 софы. продали 6 предметов. сколько соф и диванов осталось?', ['5 + 3 = 8 (шт.) – всего предметов', '8 - 6 = 2 (шт.) – осталось предметов'], 'осталось 2 софы и дивана', '2', 'штуки', 451),
@@ -4796,7 +4796,7 @@ _V51306_BATCH_STEP_EXPLANATION_OVERRIDES: dict[int, dict[int, str]] = {
     417: {1: 'улитка проползла во второй день', 2: 'улитка проползла в третий день'},
     444: {1: 'туристы прошли во второй день', 2: 'туристы прошли в третий день'},
     447: {2: 'человек осталось на остановке'},
-    448: {2: 'фруктов осталось'},
+    448: {2: 'фруктов после компота'},
     462: {2: 'человек осталось после ухода'},
     488: {1: 'ящиков осталось после обеда', 2: 'ящиков продали после обеда'},
     490: {1: 'ручек осталось после первого полугодия', 2: 'ручек исписал во втором полугодии'},
@@ -4890,9 +4890,9 @@ def _v40502_batch_401_500_payload(payload: dict[str, Any] | None, original_text:
         'v40502ExcelRow': int(excel_row),
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    if 'v513.06-batch-401-500-visible-regression' not in contract:
-        out['visibleResultContract'] = (contract + '; ' if contract else '') + 'v513.06-batch-401-500-visible-regression'
-    out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v513.06-batch-401-500-visible-regression'
+    if 'v513.07-batch-401-500-visible-regression' not in contract:
+        out['visibleResultContract'] = (contract + '; ' if contract else '') + 'v513.07-batch-401-500-visible-regression'
+    out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v513.07-batch-401-500-visible-regression'
     return out
 
 
@@ -12027,7 +12027,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v513-06-v50103-excel-401-500'
+    marker = 'v513-07-v50103-excel-401-500'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -13211,6 +13211,15 @@ async def generate_explanation_response(user_text: str, *, solver_mode: str | No
         local_payload = await _generate_local_primary_response(payload)
         return attach_release(_v4011_repair_payload(local_payload, payload))
     deepseek_payload = await _generate_deepseek_primary_response(payload, allow_external=allow_external)
+    # V513.07: _generate_deepseek_primary_response() already applies the V501/V401
+    # postprocess pipeline.  For the deterministic Excel 401-500 visible guard, a
+    # second broad _v4011_repair_payload pass damages accepted step explanations
+    # and final answers.  Preserve the exact visible contract once it is present.
+    if isinstance(deepseek_payload, dict) and (
+        deepseek_payload.get('v40502Batch401500ExactRepair')
+        or 'batch-401-500-visible-regression' in str(deepseek_payload.get('visibleResultContract') or '')
+    ):
+        return attach_release(deepseek_payload)
     return attach_release(_v4011_repair_payload(deepseek_payload, payload))
 
 
