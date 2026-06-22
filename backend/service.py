@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v512_01_v50103_excel_301_400'
-SOLVER_VERSION = 'v512-01-v50103-excel-301-400'
+APP_RELEASE = 'v513_01_v50103_excel_401_500'
+SOLVER_VERSION = 'v513-01-v50103-excel-401-500'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -11567,7 +11567,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v512-01-v50103-excel-301-400'
+    marker = 'v513-01-v50103-excel-401-500'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -12662,7 +12662,7 @@ async def _generate_deepseek_primary_response(payload: str, *, allow_external: b
         })
     ai_payload = None
     last_deepseek_exception: Exception | None = None
-    # V511.01: a transient empty/error DeepSeek response must not immediately
+    # V513.01: a transient empty/error DeepSeek response must not immediately
     # downgrade a normal audit row to local fallback.  Retry the full primary
     # API pipeline a few times; if any attempt produces a verified result, that
     # result remains the locked source of truth for number and actions.
