@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v518_01_v50103_excel_901_1000'
-SOLVER_VERSION = 'v518-01-v50103-excel-901-1000'
+APP_RELEASE = 'v519_01_v50103_excel_1001_1100'
+SOLVER_VERSION = 'v519-01-v50103-excel-1001-1100'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -6808,9 +6808,9 @@ def _v41002_batch_901_1000_payload(payload: dict[str, Any] | None, original_text
         # a post-API symbolic repair is allowed after tokens/proof are present.
         out['v40403AcceptedExcelSymbolicPostApiRepair'] = True
     contract = str(out.get('visibleResultContract') or '').strip()
-    if 'v410.03-batch-901-1000' not in contract:
-        out['visibleResultContract'] = (contract + '; ' if contract else '') + 'v410.03-batch-901-1000'
-    out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v410.03-batch-901-1000-exact-postprocess'
+    if 'v410.03-batch-1001-1100' not in contract:
+        out['visibleResultContract'] = (contract + '; ' if contract else '') + 'v410.03-batch-1001-1100'
+    out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v410.03-batch-1001-1100-exact-postprocess'
     return out
 
 _V40801_BATCH_701_800_SPECS = [('три верблюда весят d кг. вес первого верблюда b кг, второго - f кг. каков вес третьего верблюда?',
@@ -10742,9 +10742,9 @@ def _v41102_batch_1001_1100_payload(payload: dict[str, Any] | None, original_tex
         'v41102ExcelRow': int(excel_row),
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    if 'v411.04-batch-1001-1100' not in contract:
-        out['visibleResultContract'] = (contract + '; ' if contract else '') + 'v411.04-batch-1001-1100'
-    out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v411.04-batch-1001-1100-exact-postprocess'
+    if 'v519-01-v50103-excel-1001-1100' not in contract:
+        out['visibleResultContract'] = (contract + '; ' if contract else '') + 'v519-01-v50103-excel-1001-1100'
+    out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v519-01-v50103-excel-1001-1100-exact-postprocess'
     return out
 
 
