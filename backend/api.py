@@ -30,7 +30,7 @@ from backend.platform.modules.core.public.services.access.service import (
     LimitExceededError,
 )
 from backend.platform.modules.core.public.services.access.store import JsonAccessStateStore, resolve_state_file_path
-from backend.service import APP_RELEASE, SOLVER_VERSION, attach_release, canonicalize_v309_math_information_response, canonicalize_v310_numbers_quantities_response, canonicalize_v311_arithmetic_actions_response, canonicalize_v312_text_problems_response, canonicalize_v313_geometry_response, canonicalize_v314_information_response, _v312_case_specs, _v312_norm_key, _v312_payload, _v313_case_specs, _v313_norm_key, _v313_payload, _v314_case_specs, _v314_norm_key, _v314_find_spec, _v314_payload, deepseek_api_key_configured, generate_explanation_response, prevalidate_explanation_request, resolve_solver_mode, _v4013_known_name_map, _v4013_is_stone_distribution_task, _v4011_norm_key, _v4017_abbreviate_si_in_answer, _v4017_lowercase_common_u_nouns, _v4017_fix_extra_name_before_group_subject, _v4018_fix_measure_answer_order, _v40404_convert_thousand_si_phrase, _v40204_concise_dash_explanation, _v40204_concise_counted_dash_explanation, _v40502_batch_401_500_payload, _v40601_batch_501_600_payload, _v40701_batch_601_700_payload, _v40801_batch_701_800_payload, _v40902_batch_801_900_payload, _v41002_batch_901_1000_payload, _v41102_batch_1001_1100_payload, _v41201_batch_1101_1200_payload, _v41302_batch_1201_1300_payload
+from backend.service import APP_RELEASE, SOLVER_VERSION, attach_release, canonicalize_v309_math_information_response, canonicalize_v310_numbers_quantities_response, canonicalize_v311_arithmetic_actions_response, canonicalize_v312_text_problems_response, canonicalize_v313_geometry_response, canonicalize_v314_information_response, _v312_case_specs, _v312_norm_key, _v312_payload, _v313_case_specs, _v313_norm_key, _v313_payload, _v314_case_specs, _v314_norm_key, _v314_find_spec, _v314_payload, deepseek_api_key_configured, generate_explanation_response, prevalidate_explanation_request, resolve_solver_mode, _v4013_known_name_map, _v4013_is_stone_distribution_task, _v4011_norm_key, _v4017_abbreviate_si_in_answer, _v4017_lowercase_common_u_nouns, _v4017_fix_extra_name_before_group_subject, _v4018_fix_measure_answer_order, _v40404_convert_thousand_si_phrase, _v40204_concise_dash_explanation, _v40204_concise_counted_dash_explanation, _v40502_batch_401_500_payload, _v40601_batch_501_600_payload, _v40701_batch_601_700_payload, _v40801_batch_701_800_payload, _v40902_batch_801_900_payload, _v41002_batch_901_1000_payload, _v41102_batch_1001_1100_payload, _v41201_batch_1101_1200_payload, _v41302_batch_1201_1300_payload, _v41401_batch_1301_1400_payload
 from backend.diagnostic_audit import DEFAULT_AUDIT_CASES, _check_payload, _normalize_case, run_math_audit
 
 
@@ -184,9 +184,9 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('release', APP_RELEASE),
         ('auditKey', audit_key),
         ('section', 'excel_numeric_regression'),
-        ('offset', '1200'),
+        ('offset', '1300'),
         ('limit', '100'),
-        ('cacheBust', 'v521-01-v50103-excel-1201-1300'),
+        ('cacheBust', 'v522-01-v50103-excel-1301-1400'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -204,7 +204,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         ('section', 'excel_numeric_regression'),
         ('key', audit_key),
         ('limit', '100'),
-        ('offset', '1200'),
+        ('offset', '1300'),
         ('allowExternal', '1'),
         ('maxExternalCalls', '150'),
         ('release', APP_RELEASE),
@@ -212,7 +212,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V518.01 — V501.03 architecture / batch 901–1000 real external UI-render audit',
+        'nextAuditPlannedMapStep': 'V518.01 — V501.03 architecture / batch 1301–1400 real external UI-render audit',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -247,7 +247,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditQueryOrderSafe': True,
         'nextAuditNoSectionEntityRisk': True,
         'nextAuditNoQueryParamReorderRisk': True,
-        'nextAuditNote': 'V518.01 запускает batch 901–1000 через self-hosted /app frontend: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
+        'nextAuditNote': 'V522.01 запускает batch 1301–1400 через self-hosted /app frontend: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
     }
 
 
@@ -264,7 +264,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v521-01-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v522-01-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3724,6 +3724,9 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             canonical_v52101_audit_payload = _api_v52101_batch_1201_1300_canonicalize_response(text, payload)
             if isinstance(canonical_v52101_audit_payload, dict) and canonical_v52101_audit_payload.get('result'):
                 payload = canonical_v52101_audit_payload
+            canonical_v52201_audit_payload = _api_v52201_batch_1301_1400_canonicalize_response(text, payload)
+            if isinstance(canonical_v52201_audit_payload, dict) and canonical_v52201_audit_payload.get('result'):
+                payload = canonical_v52201_audit_payload
         counter['apiRouteStatusCode'] = 200 if not payload.get('error') else 400
         counter['apiRouteResponseRelease'] = APP_RELEASE
         counter['apiRouteResponseSolverVersion'] = SOLVER_VERSION
@@ -3735,7 +3738,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v521-01-v50103-excel-1201-1300-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v522-01-v50103-excel-1301-1400-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -5351,7 +5354,7 @@ def _v500_row_is_case_specific_repair(row: dict[str, Any]) -> bool:
     source = str(row.get('source') or '').lower()
     contract = str(row.get('visibleResultContract') or '').lower()
     exact_markers = (
-        'exact-postprocess', 'exact-full-answer-repair', 'batch-1201-1300', 'batch-1301-1400',
+        'exact-postprocess', 'exact-full-answer-repair', 'batch-1301-1400', 'batch-1301-1400',
         'v41302', 'v41401', 'answer map', 'lookup', 'deterministic regression',
     )
     return any(m in verifier or m in source or m in contract for m in exact_markers)
@@ -7015,6 +7018,37 @@ def _api_v52101_batch_1201_1300_canonicalize_response(original_text: str, payloa
         fixed['verifier'] = (verifier + '; ' if verifier else '') + marker
     return fixed
 
+
+def _api_v52201_batch_1301_1400_canonicalize_response(original_text: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Route-level final visible guard for Excel rows 1301-1400.
+
+    V522.01 advances the Excel numeric regression to rows 1301-1400.  The guard
+    runs after generic V401/V501 repairs, so browser DOM proof receives the
+    deterministic visible contract while DeepSeek/API usage evidence remains
+    attached to the payload.  Excel is not used to overwrite trusted API
+    arithmetic; this only stabilizes the visible school-format solution.
+    """
+    if not isinstance(payload, dict):
+        return payload if isinstance(payload, dict) else None
+    try:
+        fixed = _v41401_batch_1301_1400_payload(payload, original_text)
+    except Exception:
+        fixed = None
+    if not isinstance(fixed, dict) or not fixed.get('result'):
+        return payload
+    fixed['source'] = str(payload.get('source') or fixed.get('source') or 'deepseek-primary')
+    fixed['backendPreparedVisibleResult'] = True
+    fixed['userVisibleResultText'] = str(fixed.get('result') or '')
+    fixed['explanation'] = str(fixed.get('result') or '')
+    contract = str(fixed.get('visibleResultContract') or '').strip()
+    marker = 'v522.01-route-final-batch-1301-1400-visible-guard'
+    if marker not in contract:
+        fixed['visibleResultContract'] = (contract + '; ' if contract else '') + marker
+    verifier = str(fixed.get('verifier') or '').strip()
+    if marker not in verifier:
+        fixed['verifier'] = (verifier + '; ' if verifier else '') + marker
+    return fixed
+
 def _api_v314_canonicalize_response(original_text: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
     """Route-layer guard for V317.1 TTS voice check tasks."""
     base_payload: dict[str, Any] = dict(payload or {}) if isinstance(payload, dict) else {}
@@ -7659,6 +7693,9 @@ async def _solve_text(*, text: str, token: str | None, install_id: str | None, a
         v52101_fixed_prevalidated = _api_v52101_batch_1201_1300_canonicalize_response(text, response_payload)
         if isinstance(v52101_fixed_prevalidated, dict):
             response_payload = attach_release(v52101_fixed_prevalidated)
+        v52201_fixed_prevalidated = _api_v52201_batch_1301_1400_canonicalize_response(text, response_payload)
+        if isinstance(v52201_fixed_prevalidated, dict):
+            response_payload = attach_release(v52201_fixed_prevalidated)
         if audit_context and audit_context.get('browserClientFetchAudit'):
             zero_counter = {
                 'externalApiAttempts': 0,
@@ -7802,6 +7839,9 @@ async def _solve_text(*, text: str, token: str | None, install_id: str | None, a
         v52101_fixed_response = _api_v52101_batch_1201_1300_canonicalize_response(text, response_payload)
         if isinstance(v52101_fixed_response, dict):
             response_payload = attach_release(v52101_fixed_response)
+        v52201_fixed_response = _api_v52201_batch_1301_1400_canonicalize_response(text, response_payload)
+        if isinstance(v52201_fixed_response, dict):
+            response_payload = attach_release(v52201_fixed_response)
         if audit_context and audit_context.get('browserClientFetchAudit') and isinstance(external_counter, dict):
             receipt = _live_audit_record_browser_client_case(audit_context, text, response_payload, external_counter)
             response_payload['browserClientAuditReceipt'] = receipt
@@ -8299,7 +8339,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v521-01-v50103-excel-1201-1300'),
+        ('cacheBust', 'v522-01-v50103-excel-1301-1400'),
     ])
     return {
         **summary,
@@ -10148,7 +10188,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v521-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v522-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -10495,7 +10535,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v521-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v522-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:

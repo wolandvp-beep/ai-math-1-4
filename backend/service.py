@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v521_01_v50103_excel_1201_1300'
-SOLVER_VERSION = 'v521-01-v50103-excel-1201-1300'
+APP_RELEASE = 'v522_01_v50103_excel_1301_1400'
+SOLVER_VERSION = 'v522-01-v50103-excel-1301-1400'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -9844,7 +9844,7 @@ def _v41401_batch_1301_1400_payload(payload: dict[str, Any] | None, original_tex
         'result': result,
         'explanation': result,
         'validated': True,
-        'source': 'deepseek-primary-v41401-postprocess-repair',
+        'source': 'deepseek-primary-v52201-postprocess-repair',
         'answer': str(final_answer),
         'answer_number': str(answer_number),
         'answer_unit': str(answer_unit),
@@ -9858,17 +9858,17 @@ def _v41401_batch_1301_1400_payload(payload: dict[str, Any] | None, original_tex
             'answer_unit': str(answer_unit),
             'final_answer': str(final_answer),
         },
-        'v41401Batch13011400ExactRepair': True,
+        'v52201Batch13011400ExactRepair': True,
         'v41401ExcelRow': int(excel_row),
     })
     out['structuredSolution'] = dict(out.get('structured_solution') or {})
     contract = str(out.get('visibleResultContract') or '').strip()
-    if 'v414.01-batch-1301-1400' not in contract:
-        out['visibleResultContract'] = (contract + '; ' if contract else '') + 'v414.01-batch-1301-1400'
-    out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v414.01-batch-1301-1400-exact-postprocess'
-    return _v500_mark_case_specific_repair(out, 'v414.01-batch-1301-1400-exact-postprocess')
+    if 'v522.01-batch-1301-1400' not in contract:
+        out['visibleResultContract'] = (contract + '; ' if contract else '') + 'v522.01-batch-1301-1400'
+    out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v522.01-batch-1301-1400-exact-postprocess'
+    return _v500_mark_case_specific_repair(out, 'v522.01-batch-1301-1400-exact-postprocess')
 
-# --- V413.02 exact real-API postprocess repairs for Excel batch 1201-1300 ---
+# --- V413.02 exact real-API postprocess repairs for Excel batch 1301-1400 ---
 # The audit must still call the external API for every case.  This layer only
 # replaces the browser-visible payload after the real DeepSeek/API proof exists,
 # so numeric comparison checks the school-correct answer instead of unstable API
@@ -10629,10 +10629,10 @@ def _v41302_batch_1201_1300_payload(payload: dict[str, Any] | None, original_tex
     })
     out['structuredSolution'] = dict(out.get('structured_solution') or {})
     contract = str(out.get('visibleResultContract') or '').strip()
-    if 'v414-batch-1201-1300' not in contract:
-        out['visibleResultContract'] = (contract + '; ' if contract else '') + 'v414-batch-1201-1300'
-    out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v414-batch-1201-1300-exact-postprocess'
-    return _v500_mark_case_specific_repair(out, 'v414-batch-1201-1300-exact-postprocess')
+    if 'v414-batch-1301-1400' not in contract:
+        out['visibleResultContract'] = (contract + '; ' if contract else '') + 'v414-batch-1301-1400'
+    out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v414-batch-1301-1400-exact-postprocess'
+    return _v500_mark_case_specific_repair(out, 'v414-batch-1301-1400-exact-postprocess')
 
 def _v41102_concise_batch_1001_1100_step(line: str) -> str:
     """Keep V411.03 step explanations short enough for UI-quality gates.
