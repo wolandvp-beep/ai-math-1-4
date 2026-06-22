@@ -1,5 +1,5 @@
 (() => {
-  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v519_01_v50103_excel_1001_1100";
+  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v520_01_v50103_excel_1101_1200";
   // src/i18n/ru.js
   var ru = {
     "app.name": "\u041C\u0430\u0442\u0435\u043C\u0430\u0442\u0438\u0447\u043A\u0430",
@@ -1062,7 +1062,7 @@
     DEFAULT_LANGUAGE: "ru",
     ENABLE_DEMO_FALLBACK: true
   };
-  var EXPECTED_BACKEND_RELEASE = "v519_01_v50103_excel_1001_1100";
+  var EXPECTED_BACKEND_RELEASE = "v520_01_v50103_excel_1101_1200";
 
   // src/storage/installIdStorage.js
   var KEY5 = "matematichka_install_id";
@@ -9168,8 +9168,8 @@
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const normBase = (value) => String(value || "").trim().replace(/\/+$/g, "");
       const backendBase = normBase(params.get("backendBaseUrl") || params.get("backend") || REMOTE_EXPLAIN_PROXY_URL.replace(/\/api\/explain.*$/i, ""));
-      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v519_01_v50103_excel_1001_1100");
-      const auditKey = String(params.get("auditKey") || params.get("key") || "v519-01-live-audit");
+      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v520_01_v50103_excel_1101_1200");
+      const auditKey = String(params.get("auditKey") || params.get("key") || "v520-01-live-audit");
       const auditSection = String(params.get("section") || params.get("auditSection") || "excel_numeric_regression");
       const auditOffset = String(params.get("offset") || "900");
       const auditLimit = String(params.get("limit") || "100");
