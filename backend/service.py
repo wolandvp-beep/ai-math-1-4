@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v515_01_v50103_excel_601_700'
-SOLVER_VERSION = 'v515-01-v50103-excel-601-700'
+APP_RELEASE = 'v516_01_v50103_excel_701_800'
+SOLVER_VERSION = 'v516-01-v50103-excel-701-800'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -7454,9 +7454,9 @@ def _v40801_batch_701_800_payload(payload: dict[str, Any] | None, original_text:
         # Symbolic Excel rows are numericSkipped but require real API proof and a valid visible symbolic answer.
         out['v40403AcceptedExcelSymbolicPostApiRepair'] = True
     contract = str(out.get('visibleResultContract') or '').strip()
-    if 'v409-batch-801-900' not in contract:
-        out['visibleResultContract'] = (contract + '; ' if contract else '') + 'v409-batch-801-900'
-    out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v409-batch-801-900-exact-postprocess'
+    if 'v516-01-v50103-excel-701-800' not in contract:
+        out['visibleResultContract'] = (contract + '; ' if contract else '') + 'v516-01-v50103-excel-701-800'
+    out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v516-01-v50103-excel-701-800-exact-postprocess'
     return out
 
 _V40701_BATCH_601_700_SPECS = [('никите подарили книги. за летние каникулы он прочитал 5 книг, а за зимние - 2 книги. сколько книг подарили никите, '
