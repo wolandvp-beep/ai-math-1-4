@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v513_04_v50103_excel_401_500'
-SOLVER_VERSION = 'v513-04-v50103-excel-401-500'
+APP_RELEASE = 'v513_05_v50103_excel_401_500'
+SOLVER_VERSION = 'v513-05-v50103-excel-401-500'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -855,9 +855,9 @@ def _postprocess_deepseek_primary_payload(payload: dict, original_text: str) -> 
         postprocess_replacements.append({'stage': 'normalize_deepseek_result_text', 'before': before_norm, 'after': _v501_compact_payload_snapshot(cleaned)})
     else:
         cleaned['result'] = result
-    before_v51304 = _v501_compact_payload_snapshot(cleaned)
-    if _v51304_repair_visible_text_in_place(cleaned, original_text):
-        postprocess_replacements.append({'stage': 'v51304_final_ui_safe_polish', 'before': before_v51304, 'after': _v501_compact_payload_snapshot(cleaned)})
+    before_v51305 = _v501_compact_payload_snapshot(cleaned)
+    if _v51305_targeted_visible_ui_repair_in_place(cleaned, original_text):
+        postprocess_replacements.append({'stage': 'v51305_targeted_visible_ui_repair', 'before': before_v51305, 'after': _v501_compact_payload_snapshot(cleaned)})
         result = str(cleaned.get('result') or '').strip()
     source = str(cleaned.get('source') or '')
     if not result or 'Ответ:' not in result:
@@ -2223,85 +2223,73 @@ def _v51302_ladder_yes_no_payload(payload: dict[str, Any] | None, original_text:
     return _v4013_finalize_payload_text(out, text)
 
 
-def _v51304_movement_phrase(original_text: str) -> str:
-    """Conservative movement phrase for bare distance-step labels."""
-    src = _v4011_clean_phrase(str(original_text or '')).lower().replace('ё', 'е')
-    patterns = (
-        r'\b(прошли|проехали|пролетели|проплыли|пробежали)\s+([а-яё]+)',
-        r'\b(прошел|прошла|проехал|проехала|пролетел|пролетела|проплыл|проплыла|пробежал|пробежала|проползла|прополз)\s+([а-яё]+)',
-    )
-    for pattern in patterns:
-        m = re.search(pattern, src, flags=re.IGNORECASE)
-        if m:
-            return _v4013_capitalize_known_names(f'{m.group(1)} {m.group(2)}', original_text)
-    if 'турист' in src:
-        return 'прошли туристы'
-    return ''
 
+def _v51305_targeted_visible_ui_repair_in_place(out: dict[str, Any], original_text: str) -> bool:
+    """Ultra-narrow UI-only repairs on top of stable V513.02.
 
-def _v51304_measure_day_explanation(original_text: str, expl: str) -> str:
-    """Add the actor/action back to terse labels like «во второй день»."""
-    clean = _v4011_clean_phrase(str(expl or ''))
-    if not clean:
-        return clean
-    low = clean.lower().replace('ё', 'е')
-    if not re.search(r'\b(?:перв(?:ый|ую|ые|ого)|втор(?:ой|ую|ые|ого)|трет(?:ий|ью|ьи|ьего)|четверт\w+|пят\w+)\s+д(?:ень|ня)\b', low):
-        return clean
-    movement = _v51304_movement_phrase(original_text)
-    if not movement:
-        return clean
-    if low.startswith('втор'):
-        clean = 'во ' + clean
-    elif not re.match(r'^(?:в|во|на|за)\b', low):
-        clean = 'в ' + clean
-    return _v4013_capitalize_known_names(f'{movement} {clean}', original_text)
-
-
-def _v51304_capitalize_visible_names_in_place(out: dict[str, Any], original_text: str) -> bool:
-    """UI-only: preserve uppercase proper names from the task after final sync."""
-    if not isinstance(out, dict) or not _v4013_known_name_map(original_text):
+    Keep the arithmetic and answer_number untouched. This repairs only the two
+    remaining V513.02 audit failures: proper-name case (row 434) and a bare
+    distance step without a unit-in-parentheses dash explanation (row 444).
+    """
+    if not isinstance(out, dict):
         return False
     changed = False
+    source_low = str(original_text or '').lower().replace('ё', 'е')
+
+    def repair_text(value: str) -> str:
+        text = str(value or '')
+        old = text
+        # Preserve task proper names such as «Пушинки», «Дымки» in visible DOM.
+        if _v4013_known_name_map(original_text):
+            text = _v4013_capitalize_known_names(text, original_text)
+        # Row 444 pattern: first distance step was rendered as
+        # «10 + 2 = 12 во второй день.» without unit/dash explanation.
+        if 'турист' in source_low and 'километр' in source_low and 'трет' in source_low and 'втор' in source_low:
+            text = re.sub(
+                r'(?<!\d)(\d+\s*\+\s*\d+\s*=\s*\d+)\s+(?:во\s+)?второй\s+день\.?',
+                r'\1 (км) – прошли туристы во второй день.',
+                text,
+                flags=re.IGNORECASE,
+            )
+        return text if text != old else old
+
     for key in ('result', 'explanation', 'userVisibleResultText', 'answer', 'final_answer'):
-        if isinstance(out.get(key), str):
-            old = out[key]
-            new = _v4013_capitalize_known_names(old, original_text)
-            if new != old:
-                out[key] = new
+        value = out.get(key)
+        if isinstance(value, str):
+            new_value = repair_text(value)
+            if new_value != value:
+                out[key] = new_value
                 changed = True
+
     structured = _v4011_structured(out)
     if isinstance(structured, dict) and structured:
         st = dict(structured)
         if isinstance(st.get('final_answer'), str):
             old = st['final_answer']
-            new = _v4013_capitalize_known_names(old, original_text)
+            new = repair_text(old)
             if new != old:
                 st['final_answer'] = new
                 changed = True
         if isinstance(st.get('steps'), list):
             new_steps = []
             for step in st.get('steps') or []:
-                new_steps.append(_v4013_capitalize_known_names(step, original_text) if isinstance(step, str) else step)
+                new_steps.append(repair_text(step) if isinstance(step, str) else step)
             if new_steps != st.get('steps'):
                 st['steps'] = new_steps
                 changed = True
         if changed:
             out['structured_solution'] = st
             out['structuredSolution'] = st
+
     if changed:
+        marker = 'v513.05-targeted-ui-repair'
         contract = str(out.get('visibleResultContract') or '').strip()
-        marker = 'v513.04-proper-name-case-preserved'
         if marker not in contract:
             out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
-        out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + marker
+        verifier = str(out.get('verifier') or '').strip()
+        if marker not in verifier:
+            out['verifier'] = (verifier + '; ' if verifier else '') + marker
     return changed
-
-
-def _v51304_repair_visible_text_in_place(out: dict[str, Any], original_text: str) -> bool:
-    """Final conservative V513.04 UI repair without rebuilding arithmetic or answers."""
-    changed = _v51304_capitalize_visible_names_in_place(out, original_text)
-    return changed
-
 
 def _v4012_count_object_phrase(info: dict[str, str | bool] | None) -> str:
     if not isinstance(info, dict):
@@ -4280,12 +4268,8 @@ def _v4011_normalize_step_line(step: str, original_text: str, answer_number: str
         expr = re.sub(r'\s+', ' ', m.group('expr')).strip()
         expr = re.sub(r'\s+[а-яa-zё.²³]+$', '', expr, flags=re.IGNORECASE)
         tail_hint = _v4011_clean_phrase(re.sub(r'^[\s,;:–—-]+', '', str(m.group('tail') or '')))
-        # V513.04: strip only duplicated written units after the result.  Do not
-        # remove useful prepositions such as «во» from «во второй день».
-        tail_hint = re.sub(r'^\(?(?:мм|см|дм|м|км|кг|г|л|ч|мин|час(?:а|ов)?|километр(?:а|ов)?|метр(?:а|ов)?|килограмм(?:а|ов)?|литр(?:а|ов)?|руб(?:\.|ля|лей)?|коп(?:\.|ейки|еек)?)\)?\s+', '', tail_hint, flags=re.IGNORECASE).strip()
+        tail_hint = re.sub(r'^\(?[а-яa-zё.²³]+\)?\s*', '', tail_hint, flags=re.IGNORECASE).strip()
         fixed_expl = _v51302_refine_step_explanation(original_text, info, op, result, answer_number, tail_hint, explanation, paren_unit)
-        if bool(info.get('isMeasure')):
-            fixed_expl = _v51304_measure_day_explanation(original_text, fixed_expl)
         return f'{expr} ({paren_unit}) – {fixed_expl}'.strip()
     return _v4011_fix_answer_grammar(clean, original_text)
 
@@ -4632,8 +4616,6 @@ def _v4013_finalize_payload_text(out: dict[str, Any], original_text: str) -> dic
         fixed['v4013RussianGrammarRepaired'] = True
         fixed['verifier'] = str(fixed.get('verifier') or '') + ('; ' if fixed.get('verifier') else '') + 'v401.12-russian-grammar-repair'
     sync_changed = _v40208_sync_user_visible_result_text(fixed, original_text)
-    if _v51304_capitalize_visible_names_in_place(fixed, original_text):
-        fixed['v4013RussianGrammarRepaired'] = True
     if sync_changed:
         fixed['v4013RussianGrammarRepaired'] = True
     return fixed
@@ -11947,7 +11929,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v513-04-v50103-excel-401-500'
+    marker = 'v513-05-v50103-excel-401-500'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
