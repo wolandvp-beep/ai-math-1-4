@@ -186,7 +186,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('section', 'excel_numeric_regression'),
         ('offset', '500'),
         ('limit', '100'),
-        ('cacheBust', 'v514-01-v50103-excel-501-600'),
+        ('cacheBust', 'v514-02-v50103-excel-501-600'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -212,7 +212,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V514.01 — V501.03 architecture / batch 501–600 real external UI-render audit',
+        'nextAuditPlannedMapStep': 'V514.02 — V501.03 architecture / batch 501–600 real external UI-render audit',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -247,7 +247,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditQueryOrderSafe': True,
         'nextAuditNoSectionEntityRisk': True,
         'nextAuditNoQueryParamReorderRisk': True,
-        'nextAuditNote': 'V514.01 запускает batch 501–600 через self-hosted /app frontend: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
+        'nextAuditNote': 'V514.02 запускает batch 501–600 через self-hosted /app frontend: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
     }
 
 
@@ -264,7 +264,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v514-01-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v514-02-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3714,7 +3714,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v514-01-v50103-excel-501-600-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v514-02-v50103-excel-501-600-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -6753,7 +6753,7 @@ def _api_v51307_batch_401_500_canonicalize_response(original_text: str, payload:
 def _api_v51401_batch_501_600_canonicalize_response(original_text: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
     """Route-level final visible guard for Excel rows 501-600.
 
-    V514.01 starts the next Excel numeric regression section.  The guard is
+    V514.02 starts the next Excel numeric regression section.  The guard is
     deliberately route-level, after the generic API/V401/V501 repairs, so the
     browser DOM receives the deterministic visible contract while the real
     DeepSeek evidence and answer_number proof remain attached to the payload.
@@ -6770,7 +6770,7 @@ def _api_v51401_batch_501_600_canonicalize_response(original_text: str, payload:
     fixed['backendPreparedVisibleResult'] = True
     fixed['userVisibleResultText'] = str(fixed.get('result') or '')
     contract = str(fixed.get('visibleResultContract') or '').strip()
-    marker = 'v514.01-route-final-batch-501-600-visible-guard'
+    marker = 'v514.02-route-final-batch-501-600-visible-guard'
     if marker not in contract:
         fixed['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     verifier = str(fixed.get('verifier') or '').strip()
@@ -7226,9 +7226,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v514-01-v50103-excel-501-600',
+        'visibleResultContract': 'v514-02-v50103-excel-501-600',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v514-01-v50103-excel-501-600',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v514-02-v50103-excel-501-600',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -8020,7 +8020,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v514-01-v50103-excel-501-600'),
+        ('cacheBust', 'v514-02-v50103-excel-501-600'),
     ])
     return {
         **summary,
@@ -9869,7 +9869,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v514-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v514-02-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -10216,7 +10216,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v514-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v514-02-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:

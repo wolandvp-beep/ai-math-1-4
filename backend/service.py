@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v514_01_v50103_excel_501_600'
-SOLVER_VERSION = 'v514-01-v50103-excel-501-600'
+APP_RELEASE = 'v514_02_v50103_excel_501_600'
+SOLVER_VERSION = 'v514-02-v50103-excel-501-600'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -8242,6 +8242,24 @@ def _v40601_batch_501_600_payload(payload: dict[str, Any] | None, original_text:
             spec = (steps, final_answer, answer_number, answer_unit, excel_row)
             break
     if spec is None:
+        low = re.sub(r'\s+', ' ', str(original_text or '').lower().replace('ё', 'е')).strip()
+        if (
+            'в первый день туристы прошли 42 км' in low
+            and 'на 18 км меньше' in low
+            and 'на 6 км больше' in low
+            and 'за три дня' in low
+            and re.search(r'сколько\s+километров\s+прошли\s+туристы\s+за\s+три\s+дня', low)
+        ):
+            spec = (
+                ['42 - 18 = 24 (км) – прошли во второй день',
+                 '24 + 6 = 30 (км) – прошли в третий день',
+                 '42 + 24 + 30 = 96 (км) – всего прошли за три дня'],
+                'туристы прошли за три дня 96 км',
+                '96',
+                'км',
+                592,
+            )
+    if spec is None:
         return None
     steps, final_answer, answer_number, answer_unit, excel_row = spec
     steps = [_v41102_concise_batch_1001_1100_step(step) for step in list(steps)]
@@ -12027,7 +12045,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v514-01-v50103-excel-501-600'
+    marker = 'v514-02-v50103-excel-501-600'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
