@@ -186,7 +186,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('section', 'excel_numeric_regression'),
         ('offset', '400'),
         ('limit', '100'),
-        ('cacheBust', 'v513-02-v50103-excel-401-500'),
+        ('cacheBust', 'v513-03-v50103-excel-401-500'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -264,7 +264,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v513-02-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v513-03-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3708,7 +3708,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v513-02-v50103-excel-401-500-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v513-03-v50103-excel-401-500-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -7161,9 +7161,9 @@ def _api_v40305_nonnumeric_assignment_answer_only_payload(original_text: str, pa
         'answer_unit': '',
         'structured_solution': structured,
         'structuredSolution': structured,
-        'visibleResultContract': 'v513-02-v50103-excel-401-500',
+        'visibleResultContract': 'v513-03-v50103-excel-401-500',
         'v40305NonNumericAnswerOnly': True,
-        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v513-02-v50103-excel-401-500',
+        'verifier': (prev_verifier + '; ' if prev_verifier else '') + 'v513-03-v50103-excel-401-500',
     })
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith(('guard', 'local:')):
@@ -7943,7 +7943,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v513-02-v50103-excel-401-500'),
+        ('cacheBust', 'v513-03-v50103-excel-401-500'),
     ])
     return {
         **summary,
@@ -8737,7 +8737,7 @@ def _v50902_final_report_path_with_r(run: dict[str, Any], run_id: str, key: str 
     base_path = _browser_audit_final_report_path(run_id, key)
     try:
         payload = _v50909_compact_audit_payload(run, run_id, key)
-        payload['transport'] = 'v51302-plain-json-fragment'
+        payload['transport'] = 'v51301-plain-json-fragment'
         payload['fragmentPurpose'] = 'Decode #json= with URL decoding. It is plain compact JSON, not zlib/base64.'
         raw = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
         return base_path + '#json=' + quote(raw, safe='')
@@ -9792,7 +9792,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v513-02-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v513-03-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -10139,7 +10139,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v513-02-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v513-03-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:

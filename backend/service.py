@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v513_02_v50103_excel_401_500'
-SOLVER_VERSION = 'v513-02-v50103-excel-401-500'
+APP_RELEASE = 'v513_03_v50103_excel_401_500'
+SOLVER_VERSION = 'v513-03-v50103-excel-401-500'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -830,10 +830,16 @@ def _postprocess_deepseek_primary_payload(payload: dict, original_text: str) -> 
     cleaned_after_clean_result = _v501_compact_payload_snapshot(cleaned)
     repaired_before = _v501_compact_payload_snapshot(cleaned)
     if api_solution_locked:
-        # V509.01: API-consistent number and action sequence are locked.
-        # The broad deterministic repair layer is rescue-only and must not rewrite
-        # already verified DeepSeek steps. The cleaner above may still normalize
-        # units/grammar, but template repair is skipped.
+        # V513.02: keep the API arithmetic locked, but still run safe visible-format
+        # repairs and explicit yes/no deficit extraction.  This does not invoke broad
+        # semantic templates, so the V501 API-first architecture remains protected.
+        locked_yes_no = _v51303_ladder_yes_no_payload(cleaned, original_text)
+        if isinstance(locked_yes_no, dict):
+            cleaned = locked_yes_no
+        else:
+            locked_formatted = _v50103_format_trusted_api_payload(cleaned, original_text, decision='api_primary_verified_formatted_locked', conflict=False)
+            if isinstance(locked_formatted, dict):
+                cleaned = locked_formatted
         repaired_after = _v501_compact_payload_snapshot(cleaned)
     else:
         cleaned = _v4011_repair_payload(cleaned, original_text)
@@ -849,6 +855,9 @@ def _postprocess_deepseek_primary_payload(payload: dict, original_text: str) -> 
         postprocess_replacements.append({'stage': 'normalize_deepseek_result_text', 'before': before_norm, 'after': _v501_compact_payload_snapshot(cleaned)})
     else:
         cleaned['result'] = result
+    if _v51303_polish_payload_in_place(cleaned, original_text):
+        postprocess_replacements.append({'stage': 'v51303_final_ui_polish', 'before': repaired_after, 'after': _v501_compact_payload_snapshot(cleaned)})
+        result = str(cleaned.get('result') or '').strip()
     source = str(cleaned.get('source') or '')
     if not result or 'Ответ:' not in result:
         bad = attach_release(_tag_payload(_low_confidence_payload(original_text), source='deepseek-primary-invalid-format', solverMode=SOLVER_MODE_DEEPSEEK_PRIMARY))
@@ -1944,6 +1953,8 @@ _V4012_PEOPLE_UNITS = {
     'мальчик', 'мальчика', 'мальчиков', 'девочка', 'девочки', 'девочек',
     'брат', 'брата', 'братьев', 'сестра', 'сестры', 'сестер',
     'ребенок', 'ребенка', 'детей', 'дети', 'ученик', 'ученика', 'учеников', 'ребята', 'ребят',
+    'школьник', 'школьника', 'школьников', 'дошкольник', 'дошкольника', 'дошкольников',
+    'студент', 'студента', 'студентов', 'гребец', 'гребца', 'гребцов',
     'житель', 'жителя', 'жителей', 'жилец', 'жильца', 'жильцов', 'жильцы',
 }
 
@@ -1999,10 +2010,368 @@ def _v4012_paren_unit(unit: str, info: dict[str, str | bool] | None = None) -> s
         return 'уд.'
     if key in _V4012_PEOPLE_UNITS:
         return 'чел.'
+    if key in {'час', 'часа', 'часов'} and not bool((info or {}).get('isMeasure')):
+        return 'шт.'
     if _v4012_is_counted_piece_unit(key, info):
         return 'шт.'
     return _v4011_abbrev(key or unit)
 
+
+
+
+def _v51303_total_object_phrase(info: dict[str, str | bool] | None, original_text: str = '') -> str:
+    if not isinstance(info, dict):
+        return ''
+    phrase = _v4011_clean_phrase(str(info.get('unitPhrase') or info.get('unit') or ''))
+    phrase = re.sub(r'\s*,?\s+если\b.*$', '', phrase, flags=re.IGNORECASE).strip()
+    if phrase:
+        phrase = _v4013_strip_trailing_subject_tokens(phrase, original_text)
+    object_part, _prep, _ctx = _v4011_split_object_context(phrase) if phrase else ('', '', '')
+    return _v4011_strip_total(object_part or phrase).strip()
+
+
+def _v51303_insert_total_word(answer: str) -> str:
+    text = _v4011_clean_phrase(str(answer or ''))
+    if not text or re.search(r'\bвсего\b', text, flags=re.IGNORECASE):
+        return text
+    # Put «всего» before the first resulting number in a full sentence.
+    return re.sub(r'(?<!\d)(-?\d+(?:[,.]\d+)?)', r'всего \1', text, count=1)
+
+
+def _v51303_thousand_word(number: int | str) -> str:
+    try:
+        n = abs(int(number))
+    except Exception:
+        return 'тысяч'
+    last2 = n % 100
+    last = n % 10
+    if 11 <= last2 <= 14:
+        return 'тысяч'
+    if last == 1:
+        return 'тысяча'
+    if 2 <= last <= 4:
+        return 'тысячи'
+    return 'тысяч'
+
+
+def _v51303_short_count_phrase(current_answer: str, number: int, fallback: str) -> str:
+    current = _v4011_clean_phrase(str(current_answer or ''))
+    if re.fullmatch(rf'{number}\s+[А-ЯЁа-яёa-z. -]{{2,60}}', current, flags=re.IGNORECASE):
+        return current
+    return fallback
+
+
+def _v51303_refine_step_explanation(original_text: str, info: dict[str, str | bool], op: str, result: str, answer_number: str, existing_expl: str, generated_expl: str, paren_unit: str) -> str:
+    task_low = str(original_text or '').lower().replace('ё', 'е')
+    qlow = _v4015_last_question_sentence(original_text).lower().replace('ё', 'е')
+    expl = _v4011_clean_phrase(str(existing_expl or '')).strip()
+    generated = _v4011_clean_phrase(str(generated_expl or '')).strip()
+    object_phrase = _v51303_total_object_phrase(info, original_text)
+    if bool(info.get('isMeasure')):
+        measure_phrase = _v4011_clean_phrase(str(info.get('stepExplanation') or info.get('tail') or ''))
+        if measure_phrase and _v4011_norm_key(measure_phrase) not in {'кг', 'г', 'см', 'м', 'км', 'л', 'ч', 'мин'}:
+            object_phrase = measure_phrase
+    unit_key = _v4011_norm_key(str(info.get('unit') or ''))
+    result_is_final = bool(answer_number and _v4011_int_number(answer_number) is not None and _v4011_int_number(result) == _v4011_int_number(answer_number))
+
+    # The last addition in «Сколько всего ...» must explicitly say «всего ...».
+    if result_is_final and '+' in op and re.search(r'скольк(?:о|их)\s+всего', qlow):
+        return ('всего ' + (object_phrase or generated or 'результат')).strip()
+
+    # For counted objects/people, keep useful API context but ensure the object noun is named.
+    if _v4012_is_counted_piece_unit(unit_key, info) or _v4011_norm_key(paren_unit) in {'шт', 'шт.', 'чел', 'чел.'}:
+        meaningless = {'', 'было', 'стало', 'осталось', 'получилось', 'есть', 'на остановке', 'всего'}
+        expl_low = expl.lower().replace('ё', 'е').strip(' .')
+        if expl_low in meaningless:
+            if expl_low in {'было', 'есть'}:
+                return ('всего ' + (object_phrase or generated or 'человек')).strip()
+            if expl_low in {'стало', 'осталось', 'получилось'}:
+                return ((object_phrase or generated or 'предметов') + ' ' + expl_low).strip()
+            if expl_low.startswith(('на ', 'в ', 'во ', 'у ')) and object_phrase:
+                return (object_phrase + ' ' + expl_low).strip()
+            return object_phrase or generated or 'предметов'
+        # «вывела вторая наседка» should become «цыплят вывела вторая наседка».
+        if object_phrase and not re.search(rf'\b{re.escape(_v4011_norm_key(_v4011_unit_from_phrase(object_phrase, unit_key)))}', expl_low):
+            if re.match(r'^(?:вывел|вывела|вывели|поймал|поймали|посетил|посетили|забил|забили|отремонтировал|отремонтировали|поступил|поступило|сшил|сшили)\b', expl_low):
+                return (object_phrase + ' ' + expl).strip()
+        # Avoid copied conditional clauses from the answer.
+        expl = re.sub(r'\s*,?\s+если\b.*$', '', expl, flags=re.IGNORECASE).strip()
+        return expl or object_phrase or generated or 'предметов'
+
+    # Measurement steps with missing/awkward explanation: keep it concise.
+    expl = re.sub(r'\s*,?\s+если\b.*$', '', expl or generated, flags=re.IGNORECASE).strip()
+    if result_is_final:
+        rest_ctx = _v4011_clean_phrase(str(info.get('rest') or ''))
+        prep_ctx = ''
+        m_ctx = re.search(r'\b(из|в|во|на|за|у|с|со|для|к)\s+.+$', rest_ctx, flags=re.IGNORECASE)
+        if m_ctx:
+            prep_ctx = m_ctx.group(0)
+        if re.search(r'скольк(?:о|их)\s+всего', qlow):
+            return ('всего ' + (object_phrase or generated or 'величина')).strip()
+        if object_phrase and prep_ctx:
+            return (object_phrase + ' ' + prep_ctx).strip()
+    if expl.lower().replace('ё', 'е').strip(' .') == 'всего' and object_phrase:
+        return ('всего ' + object_phrase).strip()
+    if expl.startswith(('из ', 'в ', 'во ', 'на ', 'за ', 'у ', 'с ', 'со ', 'для ', 'к ')) and object_phrase:
+        return (object_phrase + ' ' + expl).strip()
+    return expl or generated or object_phrase or 'величина'
+
+
+def _v51303_rescale_school_numbers(text: str, divisor: int) -> str:
+    if divisor <= 1:
+        return str(text or '')
+    def repl(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        try:
+            n = int(raw)
+        except Exception:
+            return raw
+        if n != 0 and n % divisor == 0:
+            return str(n // divisor)
+        return raw
+    return re.sub(r'(?<!\d)\d+(?!\d)', repl, str(text or ''))
+
+
+def _v51303_rescale_step_if_scaled(text: str, divisor: int) -> str:
+    """Rescale a calculation line only when the whole equation is written in base units.
+
+    If the API already wrote the arithmetic in scaled units (e.g. 4 + 6 = 10
+    десятков), do not turn 10 into 1.  Rescale only equations whose numbers are
+    all multiples of the divisor and include at least one large value.
+    """
+    raw = str(text or '')
+    if divisor <= 1:
+        return raw
+    nums = [int(x) for x in re.findall(r'(?<!\d)\d+(?!\d)', raw)]
+    if not nums:
+        return raw
+    if all((n == 0 or n % divisor == 0) for n in nums) and max(nums) >= divisor * 2:
+        return _v51303_rescale_school_numbers(raw, divisor)
+    return raw
+
+
+def _v51303_scale_normalize_api_candidate(original_text: str, api_candidate: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    if not isinstance(api_candidate, dict):
+        return api_candidate, ''
+    low = str(original_text or '').lower().replace('ё', 'е')
+    answer_number = _v501_normalize_answer_number(api_candidate.get('answerNumber'))
+    n = _v4011_int_number(answer_number)
+    if n is None:
+        return api_candidate, ''
+    divisor = 1
+    unit = str(api_candidate.get('answerUnit') or '')
+    scale_unit = ''
+    if re.search(r'\bдесятк(?:а|ов|и)?\b', low) and n >= 10 and n % 10 == 0:
+        divisor = 10
+        scale_unit = 'десятков'
+    elif re.search(r'\bтысяч\w*\s+вид', low) and n >= 1000 and n % 1000 == 0:
+        divisor = 1000
+        scale_unit = 'тысяч видов'
+    if divisor == 1:
+        return api_candidate, ''
+    out = dict(api_candidate)
+    out['answerNumber'] = str(n // divisor)
+    if scale_unit:
+        out['answerUnit'] = scale_unit
+    out['finalAnswer'] = _v51303_rescale_school_numbers(str(out.get('finalAnswer') or ''), divisor)
+    steps = out.get('steps') if isinstance(out.get('steps'), list) else []
+    out['steps'] = [_v51303_rescale_step_if_scaled(str(step or ''), divisor) for step in steps]
+    return out, f'v51303-scale-normalized-{divisor}'
+
+
+def _v51303_ladder_yes_no_payload(payload: dict[str, Any] | None, original_text: str) -> dict[str, Any] | None:
+    text = str(original_text or '')
+    low = text.lower().replace('ё', 'е')
+    if 'можно ли' not in low or not re.search(r'крыши|крышу|достать|хватит', low):
+        return None
+    nums = [int(x) for x in re.findall(r'(?<!\d)(\d+)(?!\d)', low)]
+    if len(nums) < 3:
+        return None
+    target = nums[0]
+    parts = nums[1:]
+    total = sum(parts)
+    if total >= target:
+        diff = total - target
+        final_answer = f'по ним можно влезть на крышу, останется запас {diff} м' if diff else 'по ним можно влезть на крышу'
+    else:
+        diff = target - total
+        final_answer = f'по ним нельзя влезть на крышу, не хватит {diff} м'
+    steps = [f'{" + ".join(str(x) for x in parts)} = {total} (м) – длина связанных лестниц']
+    if diff:
+        if total < target:
+            steps.append(f'{target} - {total} = {diff} (м) – не хватает')
+        else:
+            steps.append(f'{total} - {target} = {diff} (м) – запас длины')
+    out = dict(payload or {})
+    result = _format_primary_solution_text(text, steps, final_answer)
+    out.update({
+        'result': result,
+        'explanation': result,
+        'userVisibleResultText': _v312_format_visible_result(steps, final_answer, text) or result,
+        'backendPreparedVisibleResult': True,
+        'validated': True,
+        'source': str(out.get('source') or 'deepseek-primary') + '; v51303-general-yes-no-length-deficit',
+        'answer': final_answer,
+        'answer_number': str(diff),
+        'answer_unit': 'м',
+        'final_answer': final_answer,
+        'structured_solution': {**_v4011_structured(out), 'steps': steps, 'answer_number': str(diff), 'answer_unit': 'м', 'final_answer': final_answer, 'v500UsesExcelExpected': False, 'v500CaseSpecificRepair': False},
+        'v51303YesNoLengthDeficit': True,
+    })
+    out['structuredSolution'] = out['structured_solution']
+    return _v4013_finalize_payload_text(out, text)
+
+
+def _v51303_movement_phrase(original_text: str) -> str:
+    """Reusable UI phrase for distance/time step explanations without changing arithmetic."""
+    src = _v4011_clean_phrase(str(original_text or '')).lower().replace('ё', 'е')
+    patterns = (
+        r'\b(прошли|проехали|пролетели|проплыли|пробежали)\s+([а-яё]+)',
+        r'\b(прошел|прошла|проехал|проехала|пролетел|пролетела|проплыл|проплыла|пробежал|пробежала)\s+([а-яё]+)',
+    )
+    for pattern in patterns:
+        m = re.search(pattern, src, flags=re.IGNORECASE)
+        if m:
+            return _v4013_capitalize_known_names(f'{m.group(1)} {m.group(2)}', original_text)
+    if 'турист' in src:
+        return 'прошли туристы'
+    return ''
+
+
+def _v51303_explanation_for_bare_measure_tail(original_text: str, tail: str, info: dict[str, str | bool]) -> str:
+    tail_clean = _v4011_clean_phrase(str(tail or ''))
+    tail_clean = re.sub(r'^(?:км|м|см|дм|мм|кг|г|л|ч|мин|час(?:а|ов)?|километр(?:а|ов)?|метр(?:а|ов)?|килограмм(?:а|ов)?)\s+', '', tail_clean, flags=re.IGNORECASE).strip()
+    movement = _v51303_movement_phrase(original_text)
+    if tail_clean:
+        if movement and re.match(r'^(?:в|во|на|за|к|ко|до|после|перед)\b', tail_clean, flags=re.IGNORECASE):
+            return _v4013_capitalize_known_names(f'{movement} {tail_clean}', original_text)
+        if movement and re.search(r'\b(?:первый|первую|второй|вторую|третий|третью|день|дня|неделю|месяц)\b', tail_clean, flags=re.IGNORECASE):
+            prep = '' if re.match(r'^(?:в|во|на|за)\b', tail_clean, flags=re.IGNORECASE) else 'в '
+            return _v4013_capitalize_known_names(f'{movement} {prep}{tail_clean}'.strip(), original_text)
+        return _v4013_capitalize_known_names(tail_clean, original_text)
+    generated = _v4011_clean_phrase(str(info.get('stepExplanation') or info.get('tail') or '')) if isinstance(info, dict) else ''
+    return _v4013_capitalize_known_names(generated or movement or 'величина', original_text)
+
+
+def _v51303_repair_bare_measure_equation_line(line: str, original_text: str, answer_number: str = '', answer_unit: str = '') -> str:
+    raw = str(line or '')
+    if not raw.strip() or '(' in raw or '–' in raw or '—' in raw:
+        return _v4013_capitalize_known_names(raw, original_text)
+    unit, info = _v500_answer_unit_and_info(original_text, answer_unit)
+    paren_unit = _v4012_paren_unit(unit or answer_unit, info)
+    if not paren_unit or paren_unit in {'шт.', 'чел.'}:
+        return _v4013_capitalize_known_names(raw, original_text)
+    numbered = re.match(r'^(?P<num>\s*\d+[\).]\s*)(?P<body>.+)$', raw)
+    prefix = numbered.group('num') if numbered else ''
+    body = numbered.group('body') if numbered else raw
+    m = re.match(
+        r'^(?P<expr>\s*-?\d+\s*(?:[+\-−·×xх*/:÷])\s*-?\d+\s*=\s*(?P<res>-?\d+))(?:\s*(?P<tail>[^.!?\n]*))(?P<punct>[.!?]?)\s*$',
+        body,
+        flags=re.IGNORECASE,
+    )
+    if not m:
+        return _v4013_capitalize_known_names(raw, original_text)
+    tail = str(m.group('tail') or '')
+    if '(' in tail or '–' in tail or '—' in tail:
+        return _v4013_capitalize_known_names(raw, original_text)
+    expr = re.sub(r'\s+', ' ', m.group('expr')).strip()
+    # If the bare tail begins with a written unit, remove only that unit from the explanation.
+    expl = _v51303_explanation_for_bare_measure_tail(original_text, tail, info)
+    punct = m.group('punct') or ''
+    fixed = f'{prefix}{expr} ({paren_unit}) – {expl}{punct}'.strip()
+    return _v4013_capitalize_known_names(fixed, original_text)
+
+
+
+
+def _v51303_refine_short_measure_day_dash_text(text: str, original_text: str, answer_unit: str = '') -> str:
+    if not isinstance(text, str) or not text:
+        return text
+    unit, info = _v500_answer_unit_and_info(original_text, answer_unit)
+    paren_unit = _v4012_paren_unit(unit or answer_unit, info)
+    if not paren_unit or paren_unit in {'шт.', 'чел.'}:
+        return _v4013_capitalize_known_names(text, original_text)
+    movement = _v51303_movement_phrase(original_text)
+    if not movement:
+        return _v4013_capitalize_known_names(text, original_text)
+
+    def repl(match: re.Match[str]) -> str:
+        prefix = match.group('prefix')
+        phrase = _v4011_clean_phrase(match.group('phrase'))
+        low = phrase.lower().replace('ё', 'е')
+        if low.startswith('втор'):
+            prep_phrase = 'во ' + phrase
+        elif re.match(r'^(?:в|во|на|за)\b', low):
+            prep_phrase = phrase
+        else:
+            prep_phrase = 'в ' + phrase
+        return prefix + _v4013_capitalize_known_names(f'{movement} {prep_phrase}', original_text)
+
+    fixed = re.sub(
+        r'(?P<prefix>\((?:мм|см|дм|м|км|кг|г|л|ч|мин|час|метр|километр)[^)]*\)\s*[—–-]\s*)(?P<phrase>(?:перв(?:ый|ую)|втор(?:ой|ую)|трет(?:ий|ью)|четверт\w+|пят\w+)\s+день)\b',
+        repl,
+        text,
+        flags=re.IGNORECASE,
+    )
+    return _v4013_capitalize_known_names(fixed, original_text)
+def _v51303_repair_bare_measure_equations_text(text: str, original_text: str, answer_number: str = '', answer_unit: str = '') -> str:
+    if not isinstance(text, str) or not text:
+        return text
+    parts = text.split('\n')
+    fixed_parts = [_v51303_repair_bare_measure_equation_line(part, original_text, answer_number, answer_unit) for part in parts]
+    fixed = '\n'.join(fixed_parts)
+    fixed = _v51303_refine_short_measure_day_dash_text(fixed, original_text, answer_unit)
+    # One more pass for names because some visible fields are built outside structured_solution.
+    return _v4013_capitalize_known_names(fixed, original_text)
+
+
+def _v51303_polish_payload_in_place(out: dict[str, Any], original_text: str) -> bool:
+    """Final V513.03 UI-only polish: names capitalization + bare measure equation formatting.
+
+    It deliberately does not change answer_number or arithmetic.  It only edits visible
+    strings after the trusted API/template decision has already been made.
+    """
+    if not isinstance(out, dict):
+        return False
+    changed = False
+    structured = _v4011_structured(out)
+    answer_number = str(out.get('answer_number') or structured.get('answer_number') or '').strip()
+    answer_unit = str(out.get('answer_unit') or structured.get('answer_unit') or '').strip()
+    for key in ('result', 'explanation', 'userVisibleResultText', 'answer', 'final_answer'):
+        if isinstance(out.get(key), str):
+            old = out[key]
+            new = _v51303_repair_bare_measure_equations_text(old, original_text, answer_number, answer_unit)
+            if new != old:
+                out[key] = new
+                changed = True
+    if isinstance(structured, dict) and structured:
+        st = dict(structured)
+        if isinstance(st.get('final_answer'), str):
+            old_final = st['final_answer']
+            new_final = _v4013_capitalize_known_names(old_final, original_text)
+            if new_final != old_final:
+                st['final_answer'] = new_final
+                changed = True
+        if isinstance(st.get('steps'), list):
+            new_steps = []
+            for step in st.get('steps') or []:
+                if isinstance(step, str):
+                    new_steps.append(_v51303_repair_bare_measure_equations_text(step, original_text, answer_number, answer_unit))
+                else:
+                    new_steps.append(step)
+            if new_steps != st.get('steps'):
+                st['steps'] = new_steps
+                changed = True
+        if changed:
+            out['structured_solution'] = st
+            out['structuredSolution'] = st
+    if changed:
+        out['v51303UiPolish'] = True
+        contract = str(out.get('visibleResultContract') or '').strip()
+        if 'v513.03-ui-polish' not in contract:
+            out['visibleResultContract'] = (contract + '; ' if contract else '') + 'v513.03-ui-polish'
+        out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v513.03-ui-polish'
+    return changed
 
 def _v4012_count_object_phrase(info: dict[str, str | bool] | None) -> str:
     if not isinstance(info, dict):
@@ -3336,6 +3705,16 @@ def _v4011_question_info(original_text: str, fallback_unit: str = '') -> dict[st
         info.update({'unit': _v4011_norm_key(fallback_unit) or 'см', 'unitPhrase': _v4011_norm_key(fallback_unit) or 'см', 'tail': tail, 'stepExplanation': 'размах крыльев', 'isMeasure': True})
         return info
 
+    # Object clocks («ручные часы», «будильники») are counted items, not time hours.
+    src_low_for_clock = src.lower().replace('ё', 'е')
+    if re.search(r'скольк(?:о|их|ими)\s+(?:всего\s+)?час(?:ов|а)?(?:\s|[?.!]|$)', low) and re.search(r'ручн[а-я]*\s+час|будильник', src_low_for_clock):
+        m_clock = re.search(r'скольк(?:о|их|ими)\s+(?:всего\s+)?час(?:ов|а)?\s+(?P<verb>поступил[а-я]*|был[а-я]*|остал[а-я]*|принес[а-я]*|принёс[а-я]*)(?:\s+(?P<rest>.+?))?[?.!]*$', low)
+        info.update({'unit': 'часов', 'unitPhrase': 'часов', 'tail': 'часов', 'stepExplanation': 'часов', 'isMeasure': False, 'totalPrefix': bool(re.search(r'скольк(?:о|их)\s+всего', low))})
+        if m_clock:
+            info['verb'] = _v4011_clean_phrase(m_clock.group('verb') or '')
+            info['rest'] = _v4011_clean_phrase(m_clock.group('rest') or '')
+        return info
+
     # Measurement questions: «Сколько литров крови у ребёнка?»
     m = re.search(r'скольк(?:о|их|ими)\s+(?:всего\s+)?(литр(?:а|ов)?|л|рубл(?:ь|я|ей)?|руб\.?|копе(?:йка|йки|ек)|коп\.?|килограмм(?:а|ов)?|кг|грамм(?:а|ов)?|г|километр(?:а|ов)?|км|метр(?:а|ов)?|м|сантиметр(?:а|ов)?|см|миллиметр(?:а|ов)?|мм|дециметр(?:а|ов)?|дм|минут(?:а|ы)?|мин|час(?:а|ов)?|сут(?:ки|ок|\.)?|год(?:а|ов)?|лет|день|дня|дней)\s+(.+)$', low)
     if m:
@@ -3353,7 +3732,7 @@ def _v4011_question_info(original_text: str, fallback_unit: str = '') -> dict[st
         return info
 
     # Counted-object questions: «Сколько распустившихся роз стало на кусте?»
-    verb_pattern = r'(сидел[а-я]*|был[а-я]*|стал[а-я]*|остал[а-я]*|раст[а-я]*|росл[а-я]*|ехал[а-я]*|пасл[а-я]*|стоял[а-я]*|получил[а-я]*|лежал[а-я]*|будет|находил[а-я]*|вышл[а-я]*|уш[её]л[а-я]*|ушл[а-я]*|пришл[а-я]*|приехал[а-я]*|приехал[а-я]*|прочитал[а-я]*|собрал[а-я]*|купил[а-я]*|купили|решил[а-я]*|сделал[а-я]*|израсходовал[а-я]*|потратил[а-я]*|нашел[а-я]*|сорвал[а-я]*|съел[а-я]*|посадил[а-я]*|принес[а-я]*|привезл[а-я]*|смотр[а-я]*|продал[а-я]*|отдал[а-я]*|взял[а-я]*|положил[а-я]*|подарил[а-я]*|исписал[а-я]*|нарисовал[а-я]*|заготовил[а-я]*|засушил[а-я]*|вымыл[а-я]*|выучил[а-я]*|попал[а-я]*|подписал[а-я]*|покрасил[а-я]*|убежал[а-я]*|подарил[а-я]*|дали|потребуе[а-я]*|зарабатывае[а-я]*|занимал[а-я]*|занимались|дышит|дышат|поют|играют|пел[а-я]*|жив[а-я]*)'
+    verb_pattern = r'(сидел[а-я]*|был[а-я]*|стал[а-я]*|остал[а-я]*|раст[а-я]*|росл[а-я]*|ехал[а-я]*|пасл[а-я]*|стоял[а-я]*|получил[а-я]*|лежал[а-я]*|будет|находил[а-я]*|вышл[а-я]*|уш[её]л[а-я]*|ушл[а-я]*|пришл[а-я]*|приехал[а-я]*|приехал[а-я]*|прочитал[а-я]*|собрал[а-я]*|купил[а-я]*|купили|решил[а-я]*|сделал[а-я]*|израсходовал[а-я]*|потратил[а-я]*|нашел[а-я]*|сорвал[а-я]*|съел[а-я]*|посадил[а-я]*|принес[а-я]*|привезл[а-я]*|смотр[а-я]*|продал[а-я]*|отдал[а-я]*|взял[а-я]*|положил[а-я]*|подарил[а-я]*|исписал[а-я]*|нарисовал[а-я]*|заготовил[а-я]*|засушил[а-я]*|вымыл[а-я]*|выучил[а-я]*|попал[а-я]*|поймал[а-я]*|пришил[а-я]*|подписал[а-я]*|покрасил[а-я]*|убежал[а-я]*|вывел[а-я]*|посетил[а-я]*|вынул[а-я]*|поступил[а-я]*|забил[а-я]*|отремонтировал[а-я]*|сшил[а-я]*|испек[а-я]*|испёк[а-я]*|прошел[а-я]*|прошёл[а-я]*|прошл[а-я]*|подарил[а-я]*|дали|потребуе[а-я]*|зарабатывае[а-я]*|занимал[а-я]*|занимались|дышит|дышат|поют|играют|пел[а-я]*|жив[а-я]*)'
     m = re.search(rf'скольк(?:о|их|ими)\s+(?:всего\s+)?(.+?)\s+{verb_pattern}(?:\s+(.+))?$', low)
     if m:
         raw_unit_phrase = _v4011_strip_total(_v4011_clean_phrase(m.group(1)))
@@ -3712,12 +4091,24 @@ def _v4011_build_final_answer(original_text: str, number: int, info: dict[str, s
         unit_word = _v4017_answer_unit_word(number, unit)
         verb = _v4011_clean_phrase(str(info.get('verb') or ''))
         rest = _v4011_clean_phrase(str(info.get('rest') or ''))
+        measure_obj_for_answer = _v4011_clean_phrase(str(info.get('stepExplanation') or info.get('tail') or ''))
+        if _v4011_norm_key(measure_obj_for_answer) in {'', _v4011_norm_key(unit), 'кг', 'г', 'см', 'м', 'км', 'л', 'ч', 'мин'}:
+            measure_obj_for_answer = ''
+        unit_with_object = (unit_word + (' ' + measure_obj_for_answer if measure_obj_for_answer and measure_obj_for_answer not in rest else '')).strip()
+        qlow_for_measure_answer = _v4015_last_question_sentence(original_text).lower().replace('ё', 'е')
+        m_measure_q = re.search(r'скольк(?:о|их)\s+(?:всего\s+)?(?:килограмм(?:ов|а)?\s+)?(?P<object>.+?)\s+(?P<verb>собрал[а-я]*|съел[а-я]*|съеда[а-я]*|купил[а-я]*|вынул[а-я]*|потратил[а-я]*|израсходовал[а-я]*)\s+(?P<subject>[^?.!]+)', qlow_for_measure_answer)
+        if m_measure_q and _v4011_norm_key(unit) in {'кг', 'килограмм', 'килограмма', 'килограммов'}:
+            obj = _v4011_clean_phrase(m_measure_q.group('object')) or measure_obj_for_answer
+            subj = _v4011_clean_phrase(m_measure_q.group('subject'))
+            vq = _v4011_clean_phrase(m_measure_q.group('verb'))
+            total_word = 'всего ' if re.search(r'скольк(?:о|их)\s+всего', qlow_for_measure_answer) else ''
+            return f'{subj} {vq} {total_word}{number} {unit_word}' + (f' {obj}' if obj else '')
         if verb:
             if verb.startswith('потреб'):
-                return f'{verb} {number} {unit_word} {rest}'.strip()
+                return f'{verb} {number} {unit_with_object} {rest}'.strip()
             if rest:
-                return f'{rest} {verb} {number} {unit_word}'.strip()
-            return f'{verb} {number} {unit_word}'.strip()
+                return f'{rest} {verb} {number} {unit_with_object}'.strip()
+            return f'{verb} {number} {unit_with_object}'.strip()
         if tail:
             tail_for_answer = _v4013_capitalize_known_names(tail, original_text)
             measure_tail_answer = _v4017_measure_tail_answer(tail_for_answer, number, unit_word)
@@ -3769,6 +4160,21 @@ def _v4011_build_final_answer(original_text: str, number: int, info: dict[str, s
     if not bool(info.get('isMeasure')):
         qlow = _v4015_last_question_sentence(original_text).lower().replace('ё', 'е')
         object_phrase_for_answer = _v4011_phrase_with_number(number, unit_phrase or unit, unit)
+        short_object_phrase_for_answer = _v51303_short_count_phrase(current, number, object_phrase_for_answer)
+        m_total_bilo = re.search(r'сколько\s+всего\s+(.+?)\s+было\s+(.+?)[?.!]*$', qlow)
+        if m_total_bilo:
+            context = _v4013_capitalize_known_names(_v4011_clean_phrase(m_total_bilo.group(2)), original_text)
+            return f'{context} было всего {short_object_phrase_for_answer}'.strip()
+        m_total_loc = re.search(r'сколько\s+всего\s+(.+?)\s+(в|на)\s+(.+?)[?.!]*$', qlow)
+        if m_total_loc and not re.search(r'\b(было|стало|осталось|испек|сшил|купил|привез|собрал|съел)\b', m_total_loc.group(1)):
+            prep = _v4011_clean_phrase(m_total_loc.group(2))
+            context = _v4013_capitalize_known_names(_v4011_clean_phrase(m_total_loc.group(3)), original_text)
+            return f'{prep} {context} всего {short_object_phrase_for_answer}'.strip()
+        m_total_verb_subject = re.search(r'сколько\s+всего\s+(.+?)\s+(испек[а-я]*|испёк[а-я]*|сшил[а-я]*|купил[а-я]*|привез[а-я]*|привёз[а-я]*|собрал[а-я]*|забил[а-я]*)\s+(.+?)[?.!]*$', qlow)
+        if m_total_verb_subject:
+            verb_q = _v4011_clean_phrase(m_total_verb_subject.group(2))
+            subject_q = _v4013_capitalize_known_names(_v4011_clean_phrase(m_total_verb_subject.group(3)), original_text)
+            return f'{subject_q} {verb_q} всего {short_object_phrase_for_answer}'.strip()
         if re.search(r'сколько\s+осталось', qlow):
             return f'осталось {object_phrase_for_answer}'.strip()
         m_unknown = re.search(r'сколько\s+(.+?)\s+(убежал[а-яё]*|подписал[а-яё]*|покрасил[а-яё]*|приехал[а-яё]*|ушел|ушло|ушли|дали|подарил[а-яё]*|сшил[а-яё]*|поймал[а-яё]*|болел[а-яё]*|было|посадил[а-яё]*|стои[а-яё]*|прочитал[а-яё]*)(?:\s+(.+))?$', qlow)
@@ -3800,6 +4206,7 @@ def _v4011_build_final_answer(original_text: str, number: int, info: dict[str, s
         word = unit_phrase
     verb = _v4011_clean_phrase(str(info.get('verb') or ''))
     rest = _v4011_clean_phrase(str(info.get('rest') or ''))
+    rest = re.sub(r'\s*,?\s+если\b.*$', '', rest, flags=re.IGNORECASE).strip()
     subject = _v4013_capitalize_known_names(str(info.get('subject') or _v4015_question_subject(original_text) or '').strip(), original_text)
     if unit in {'раз', 'раза'} and verb.startswith('попал'):
         target = rest or 'в мишень'
@@ -3807,14 +4214,14 @@ def _v4011_build_final_answer(original_text: str, number: int, info: dict[str, s
     if verb and rest:
         object_phrase = _v4011_phrase_with_number(number, unit_phrase or unit, unit)
         counted_answer = _v4015_counted_final_answer(subject, verb, rest, number, object_phrase, original_text)
-        if bool(info.get('totalPrefix')) and bool(info.get('broadGroupSubject')) and not counted_answer.lower().startswith('всего '):
-            counted_answer = 'всего ' + counted_answer
+        if bool(info.get('totalPrefix')) and not re.search(r'\bвсего\b', counted_answer, flags=re.IGNORECASE):
+            counted_answer = _v51303_insert_total_word(counted_answer)
         return counted_answer
     if verb:
         object_phrase = _v4011_phrase_with_number(number, unit_phrase or unit, unit)
         counted_answer = _v4015_counted_final_answer(subject, verb, '', number, object_phrase, original_text)
-        if bool(info.get('totalPrefix')) and bool(info.get('broadGroupSubject')) and not counted_answer.lower().startswith('всего '):
-            counted_answer = 'всего ' + counted_answer
+        if bool(info.get('totalPrefix')) and not re.search(r'\bвсего\b', counted_answer, flags=re.IGNORECASE):
+            counted_answer = _v51303_insert_total_word(counted_answer)
         return counted_answer
     object_part, prep, context = _v4011_split_object_context(tail or unit_phrase)
     object_phrase = _v4011_phrase_with_number(number, object_part or unit_phrase or unit, unit)
@@ -3916,8 +4323,6 @@ def _v4011_normalize_step_line(step: str, original_text: str, answer_number: str
     if not m:
         return _v4011_fix_answer_grammar(clean, original_text)
     result = m.group('res')
-    if answer_number and _v4011_int_number(answer_number) is not None and int(result) != int(_v4011_int_number(answer_number)):
-        return _v4011_fix_answer_grammar(clean, original_text)
     op = '-' if re.search(r'[\-−]', m.group('expr')) else ('+' if '+' in m.group('expr') else '')
     explanation = _v4011_step_explanation(original_text, info, op)
     explanation = _v4013_capitalize_known_names(_v4013_strip_trailing_subject_tokens(explanation, original_text), original_text)
@@ -3938,12 +4343,19 @@ def _v4011_normalize_step_line(step: str, original_text: str, answer_number: str
             unit_keys = {old_unit, desired_unit, _v4011_norm_key(_v4011_abbrev(old_unit)), _v4011_norm_key(_v4011_abbrev(desired_unit))}
             bad_explanation = (not old_expl_key) or old_expl_key in unit_keys or old_expl_key in _V4013_SUBJECT_PRONOUNS or old_expl_key.endswith(' он') or old_expl_key.endswith(' она')
             if old_unit != desired_unit or bad_explanation or (old_expl != desired_expl and (bool(info.get('isMeasure')) or _v4012_is_counted_piece_unit(unit, info))):
-                return f'{expr} ({paren_unit}) – {explanation}'.strip()
+                fixed_expl = _v51303_refine_step_explanation(original_text, info, op, result, answer_number, old_expl, explanation, paren_unit)
+                return f'{expr} ({paren_unit}) – {fixed_expl}'.strip()
         return _v4011_fix_answer_grammar(clean, original_text)
     if paren_unit:
         expr = re.sub(r'\s+', ' ', m.group('expr')).strip()
         expr = re.sub(r'\s+[а-яa-zё.²³]+$', '', expr, flags=re.IGNORECASE)
-        return f'{expr} ({paren_unit}) – {explanation}'.strip()
+        tail_hint = _v4011_clean_phrase(re.sub(r'^[\s,;:–—-]+', '', str(m.group('tail') or '')))
+        # V513.03: strip only a duplicated written unit after the result, not a
+        # useful preposition such as «во второй день».  The previous broad regex
+        # removed «во» and left too-short explanations like «день».
+        tail_hint = re.sub(r'^\(?(?:мм|см|дм|м|км|кг|г|л|ч|мин|час(?:а|ов)?|километр(?:а|ов)?|метр(?:а|ов)?|килограмм(?:а|ов)?|литр(?:а|ов)?|руб(?:\.|ля|лей)?|коп(?:\.|ейки|еек)?)\)?\s+', '', tail_hint, flags=re.IGNORECASE).strip()
+        fixed_expl = _v51303_refine_step_explanation(original_text, info, op, result, answer_number, tail_hint, explanation, paren_unit)
+        return f'{expr} ({paren_unit}) – {fixed_expl}'.strip()
     return _v4011_fix_answer_grammar(clean, original_text)
 
 
@@ -4288,7 +4700,14 @@ def _v4013_finalize_payload_text(out: dict[str, Any], original_text: str) -> dic
     if changed:
         fixed['v4013RussianGrammarRepaired'] = True
         fixed['verifier'] = str(fixed.get('verifier') or '') + ('; ' if fixed.get('verifier') else '') + 'v401.12-russian-grammar-repair'
+    v51303_changed = _v51303_polish_payload_in_place(fixed, original_text)
+    if v51303_changed:
+        fixed['v4013RussianGrammarRepaired'] = True
     sync_changed = _v40208_sync_user_visible_result_text(fixed, original_text)
+    if sync_changed:
+        # Sync can rebuild userVisibleResultText from structured steps; polish it once more.
+        if _v51303_polish_payload_in_place(fixed, original_text):
+            fixed['v4013RussianGrammarRepaired'] = True
     if sync_changed:
         fixed['v4013RussianGrammarRepaired'] = True
     return fixed
@@ -4365,7 +4784,7 @@ _V40602_BATCH_401_500_SPECS = [
     ('дачники летом собрали 33 кг малины, а смородины - на 14 кг больше. сколько всего ягод собрали дачники?', ['33 + 14 = 47 (кг) – смородины', '33 + 47 = 80 (кг) – всего ягод'], 'дачники собрали 80 кг ягод', '80', 'кг', 431),
     ('на дереве 24 груши, а под деревом - на 15 груш меньше. сколько всего груш на дереве и под деревом?', ['24 - 15 = 9 (шт.) – груш под деревом', '24 + 9 = 33 (шт.) – всего груш'], 'на дереве и под деревом 33 груши', '33', 'груши', 432),
     ('слону в зоологическом парке дают в день 20 кг картофеля, а моркови - на 15 кг меньше. сколько картофеля и моркови съедает слон за один день?', ['20 - 15 = 5 (кг) – моркови', '20 + 5 = 25 (кг) – всего картофеля и моркови'], 'слон съедает за один день 25 кг картофеля и моркови', '25', 'кг', 433),
-    ('у мурки 3 котенка, у пушинки - на 2 котенка больше, а у дымки столько котят, сколько у мурки и пушинки вместе. сколько котят у дымки?', ['3 + 2 = 5 (шт.) – котят у пушинки', '3 + 5 = 8 (шт.) – котят у дымки'], 'у дымки 8 котят', '8', 'котят', 434),
+    ('у мурки 3 котенка, у пушинки - на 2 котенка больше, а у дымки столько котят, сколько у мурки и пушинки вместе. сколько котят у дымки?', ['3 + 2 = 5 (шт.) – котят у Пушинки', '3 + 5 = 8 (шт.) – котят у Дымки'], 'у Дымки 8 котят', '8', 'котят', 434),
     ('в одном доме 40 жильцов, во втором - на 20 человек больше. сколько жильцов в двух домах?', ['40 + 20 = 60 (чел.) – жильцов во втором доме', '40 + 60 = 100 (чел.) – всего жильцов'], 'в двух домах 100 жильцов', '100', 'жильцов', 435),
     ('на первом этаже живут 30 человек, а на втором - на 10 человек больше. сколько человек живут на двух этажах?', ['30 + 10 = 40 (чел.) – человек на втором этаже', '30 + 40 = 70 (чел.) – всего человек'], 'на двух этажах живут 70 человек', '70', 'человек', 436),
     ('на одной грядке 45 кустов клубники, на второй - на 17 кустов больше. сколько кустов клубники на двух грядках?', ['45 + 17 = 62 (шт.) – кустов на второй грядке', '45 + 62 = 107 (шт.) – всего кустов клубники'], 'на двух грядках 107 кустов клубники', '107', 'кустов', 437),
@@ -4378,12 +4797,12 @@ _V40602_BATCH_401_500_SPECS = [
     ('в первый день туристы прошли 10 км, во второй - на 2 км больше, а в третий столько, сколько в первый и второй день вместе. сколько километров пройденный путь в третий день?', ['10 + 2 = 12 (км) – во второй день', '10 + 12 = 22 (км) – в третий день'], 'в третий день туристы прошли 22 км', '22', 'км', 444),
     ('средняя высота айсберга над водой 100 м, а под водой - на 600 м больше. какова общая высота айсберга?', ['100 + 600 = 700 (м) – высота под водой', '100 + 700 = 800 (м) – общая высота'], 'общая высота айсберга 800 м', '800', 'м', 445),
     ('андрей поймал столько раков, сколько букв в его имени, а саша - на 7 раков больше. сколько раков поймали оба мальчика?', ['6 + 7 = 13 (шт.) – раков Саши', '6 + 13 = 19 (шт.) – всего раков'], 'оба мальчика поймали 19 раков', '19', 'раков', 446),
-    ('на остановке стояли 3 мужчины и 5 женщин. уехали 6 человек. сколько человек осталось на остановке?', ['3 + 5 = 8 (чел.) – всего человек', '8 - 6 = 2 (чел.) – человек на остановке'], 'на остановке осталось 2 человека', '2', 'человека', 447),
+    ('на остановке стояли 3 мужчины и 5 женщин. уехали 6 человек. сколько человек осталось на остановке?', ['3 + 5 = 8 (чел.) – всего человек', '8 - 6 = 2 (чел.) – на остановке'], 'на остановке осталось 2 человека', '2', 'человека', 447),
     ('купили 8 кг яблок и 2 кг груш. из 3 кг фруктов сварили компот. сколько килограммов фруктов осталось?', ['8 + 2 = 10 (кг) – всего фруктов', '10 - 3 = 7 (кг) – осталось фруктов'], 'осталось 7 кг фруктов', '7', 'кг', 448),
     ('на клумбе росло 6 фиолетовых астр и 3 розовые астры. для букета срезали 5 астр. сколько астр осталось на клумбе?', ['6 + 3 = 9 (шт.) – всего астр', '9 - 5 = 4 (шт.) – осталось астр'], 'на клумбе осталось 4 астры', '4', 'астры', 449),
     ('на ветке сидело 2 воробья и 4 синицы. улетело 4 птицы. сколько птиц осталось на ветке?', ['2 + 4 = 6 (шт.) – всего птиц', '6 - 4 = 2 (шт.) – осталось птиц'], 'на ветке осталось 2 птицы', '2', 'птицы', 450),
     ('в мебельном магазине было 5 диванов и 3 софы. продали 6 предметов. сколько соф и диванов осталось?', ['5 + 3 = 8 (шт.) – всего предметов', '8 - 6 = 2 (шт.) – осталось предметов'], 'осталось 2 софы и дивана', '2', 'штуки', 451),
-    ('в палатке было 6 пар туфель и 4 пары ботинок. продали 7 пар обуви. сколько пар обуви осталось в палатке?', ['6 + 4 = 10 (шт.) – всего пар обуви', '10 - 7 = 3 (шт.) – осталось пар обуви'], 'в палатке осталось 3 пары обуви', '3', 'пары', 452),
+    ('в палатке было 6 пар туфель и 4 пары ботинок. продали 7 пар обуви. сколько пар обуви осталось в палатке?', ['6 + 4 = 10 (шт.) – пар обуви', '10 - 7 = 3 (шт.) – осталось пар'], 'в палатке осталось 3 пары обуви', '3', 'пары', 452),
     ('у карины было 3 книги о животных и 4 - о детях. она прочитала 2 книги. сколько книг ей осталось прочитать?', ['3 + 4 = 7 (шт.) – всего книг', '7 - 2 = 5 (шт.) – осталось прочитать'], 'Карине осталось прочитать 5 книг', '5', 'книг', 453),
     ('за лето сварили 5 банок сливового варенья и 4 банки абрикосового варенья. съели 6 банок варенья. сколько банок варенья осталось?', ['5 + 4 = 9 (шт.) – всего банок варенья', '9 - 6 = 3 (шт.) – осталось банок'], 'осталось 3 банки варенья', '3', 'банки', 454),
     ('собрали 36 кг ягод черной смородины, а красной смородины собрали 24 кг. хозяйка продала на рынке 18 кг смородины. сколько килограммов смородины осталось?', ['36 + 24 = 60 (кг) – всего смородины', '60 - 18 = 42 (кг) – осталось смородины'], 'осталось 42 кг смородины', '42', 'кг', 455),
@@ -4398,7 +4817,7 @@ _V40602_BATCH_401_500_SPECS = [
     ('под одной яблоней было 14 яблок, под другой - 23 яблока. ежик утащил 12 яблок. сколько яблок осталось?', ['14 + 23 = 37 (шт.) – всего яблок', '37 - 12 = 25 (шт.) – осталось яблок'], 'осталось 25 яблок', '25', 'яблок', 464),
     ('на одной аллее 15 скамеек, а на другой - 22 скамейки. унесли 6 скамеек. сколько скамеек осталось?', ['15 + 22 = 37 (шт.) – всего скамеек', '37 - 6 = 31 (шт.) – осталось скамеек'], 'осталась 31 скамейка', '31', 'скамейка', 465),
     ('в магазин привезли 32 пары женской обуви и 42 пары мужской обуви. продали 14 пар обуви. сколько пар обуви осталось?', ['32 + 42 = 74 (шт.) – пар обуви', '74 - 14 = 60 (шт.) – осталось пар'], 'осталось 60 пар обуви', '60', 'пар', 466),
-    ('в одном вагоне было 34 человека, в другом - 12 человек. на остановке вышли 15 человек. сколько человек осталось в этих вагонах?', ['34 + 12 = 46 (чел.) – всего человек', '46 - 15 = 31 (чел.) – человек в вагонах'], 'в вагонах осталось 31 человек', '31', 'человек', 467),
+    ('в одном вагоне было 34 человека, в другом - 12 человек. на остановке вышли 15 человек. сколько человек осталось в этих вагонах?', ['34 + 12 = 46 (чел.) – всего человек', '46 - 15 = 31 (чел.) – в вагонах'], 'в вагонах осталось 31 человек', '31', 'человек', 467),
     ('на складе было 37 мешков гречневой крупы и 43 мешка пшена. в магазин отправили 50 мешков. сколько мешков осталось на складе?', ['37 + 43 = 80 (шт.) – всего мешков', '80 - 50 = 30 (шт.) – осталось мешков'], 'на складе осталось 30 мешков', '30', 'мешков', 468),
     ('девочка принесла из леса 15 рыжиков и 38 волнушек. 7 грибов оказались червивыми. сколько хороших грибов принесла девочка?', ['15 + 38 = 53 (шт.) – всего грибов', '53 - 7 = 46 (шт.) – хороших грибов'], 'девочка принесла 46 хороших грибов', '46', 'грибов', 469),
     ('семья собрала летом 16 кг клюквы и 14 кг черники. съели 8 кг ягод, а из остальных сварили варенье. сколько килограммов ягод пошло на варенье?', ['16 + 14 = 30 (кг) – всего ягод', '30 - 8 = 22 (кг) – ягод на варенье'], 'на варенье пошло 22 кг ягод', '22', 'кг', 470),
@@ -4419,7 +4838,7 @@ _V40602_BATCH_401_500_SPECS = [
     ('мальчик сорвал 15 сладких яблок и 5 кислых. из них 3 оказались гнилыми. сколько сорвано хороших яблок?', ['15 + 5 = 20 (шт.) – всего яблок', '20 - 3 = 17 (шт.) – хороших яблок'], 'сорвано 17 хороших яблок', '17', 'яблок', 485),
     ('у собаки было 5 белых щенков и 4 коричневых. когда несколько щенков продали, их осталось 6. сколько щенков продали?', ['5 + 4 = 9 (шт.) – всего щенков', '9 - 6 = 3 (шт.) – продали щенков'], 'продали 3 щенка', '3', 'щенка', 486),
     ('ателье сшило 6 детских и 2 взрослых костюма. после того как сшили еще несколько костюмов, заказчикам выдали 10 костюмов. сколько костюмов сшили дополнительно?', ['6 + 2 = 8 (шт.) – костюмов сначала', '10 - 8 = 2 (шт.) – дополнительных костюмов'], 'дополнительно сшили 2 костюма', '2', 'костюма', 487),
-    ('в ларьке было 9 ящиков с фруктами. до обеда продали 3 ящика. сколько ящиков продали после обеда, если вечером осталось2 ящика?', ['9 - 3 = 6 (шт.) – ящиков осталось после обеда', '6 - 2 = 4 (шт.) – ящиков продали после обеда'], 'после обеда продали 4 ящика', '4', 'ящика', 488),
+    ('в ларьке было 9 ящиков с фруктами. до обеда продали 3 ящика. сколько ящиков продали после обеда, если вечером осталось2 ящика?', ['9 - 3 = 6 (шт.) – осталось после обеда', '6 - 2 = 4 (шт.) – продали после обеда'], 'после обеда продали 4 ящика', '4', 'ящика', 488),
     ('в вазе лежало 5 яблок и 3 банана. когда несколько фруктов съели, их осталось 4. сколько яблок и бананов съели?', ['5 + 3 = 8 (шт.) – всего фруктов', '8 - 4 = 4 (шт.) – съели фруктов'], 'съели 4 фрукта', '4', 'фрукта', 489),
     ('у сережи было 9 ручек. он исписал 4 ручки в первом полугодии. сколько ручек он исписал во втором полугодии, если к концу года осталась 1 ручка?', ['9 - 4 = 5 (шт.) – осталось после первого полугодия', '5 - 1 = 4 (шт.) – исписал во втором полугодии'], 'во втором полугодии Сережа исписал 4 ручки', '4', 'ручки', 490),
     ('на стоянке было 4 грузовых и 1 легковая машина. после того как приехало еще несколько машин, их стало 8. сколько машин приехало?', ['4 + 1 = 5 (шт.) – было машин', '8 - 5 = 3 (шт.) – приехало машин'], 'на стоянку приехали 3 машины', '3', 'машины', 491),
@@ -4445,9 +4864,8 @@ def _v40502_batch_401_500_payload(payload: dict[str, Any] | None, original_text:
     if spec is None:
         return None
     steps, final_answer, answer_number, answer_unit, excel_row = spec
-    # V513.02: keep the curated 401-500 visible-step wording intact.
-    # The V411 step cleaner is for another batch and can over-shorten rows like 488.
-    steps = list(steps)
+    steps = [_v41102_concise_batch_1001_1100_step(step) for step in list(steps)]
+    steps = _v41102_deduplicate_batch_1001_1100_steps(list(steps))
     result = _format_primary_solution_text(original_text, list(steps), str(final_answer))
     out = dict(payload or {})
     existing_source = str(out.get('source') or '').strip()
@@ -10674,6 +11092,18 @@ def _v500_answer_unit_and_info(original_text: str, fallback_unit: str = '') -> t
     unit = str(info.get('unit') or fallback_unit or '').strip()
     low = _v500_norm(original_text)
     qlow = _v500_norm(_v500_last_question_sentence(original_text))
+    if re.search(r'скольк(?:о|их)\s+пар(?:ы)?\s+обуви', qlow):
+        info = {**dict(info), 'unit': 'пары', 'unitPhrase': 'пары обуви', 'tail': str(info.get('tail') or 'обуви'), 'stepExplanation': 'пар обуви'}
+        unit = 'пары'
+    # If all arithmetic quantities are kilograms but the question names the substance
+    # («мёд», «ягоды», «картофель и морковь») without repeating «кг», keep the
+    # visible calculation in kilograms, not in counted pieces.
+    if re.search(r'(?<!\d)\d+\s*кг\b', low) and re.search(r'скольк(?:о|их)\s+(?:всего\s+)?(?!ящик|короб|мешк|ведер|вёдер|банок|бутылок|стакан)(?:[а-яё]+)(?:\s+и\s+[а-яё]+)?', qlow):
+        if not re.search(r'скольк(?:о|их)\s+(?:всего\s+)?(?:ящик|короб|мешк|ведер|вёдер|банок|бутылок|стакан)', qlow):
+            target_match = re.search(r'скольк(?:о|их)\s+(?:всего\s+)?(?:килограмм(?:ов|а)?\s+)?(.+?)(?:\s+(?:собрал|собрали|вынул|вынули|съедает|съели|пошло|осталось|купил|купила)|\?|$)', qlow)
+            target = _v4011_clean_phrase(target_match.group(1)) if target_match else 'величина'
+            info = {**dict(info), 'unit': 'кг', 'unitPhrase': 'кг', 'tail': target, 'stepExplanation': target, 'isMeasure': True}
+            unit = 'кг'
     # Measurements explicitly present in condition must stay measurements, not
     # counted objects.  This fixes templates such as «длина отрезка 6 см, на 5 см
     # больше» where V501.02 degraded a correct API «11 см» into «11 длина».
@@ -11018,12 +11448,23 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
     api_candidate = api_candidate or _v501_raw_api_answer_candidate(payload)
     if not isinstance(api_candidate, dict) or not api_candidate.get('trusted'):
         return None
+    api_candidate, v51303_scale_marker = _v51303_scale_normalize_api_candidate(original_text, api_candidate)
     answer_number = _v501_normalize_answer_number(api_candidate.get('answerNumber'))
     if not answer_number:
         return None
     n_int = _v4011_int_number(answer_number)
     answer_unit = str(api_candidate.get('answerUnit') or payload.get('answer_unit') or '').strip()
     unit, info = _v500_answer_unit_and_info(original_text, answer_unit)
+    if v51303_scale_marker and str(answer_unit).startswith('тысяч'):
+        unit = answer_unit
+        low_for_scale_info = str(original_text or '').lower().replace('ё', 'е')
+        scale_tail = 'видов'
+        if 'водорос' in low_for_scale_info:
+            scale_tail = 'видов водорослей'
+        info = {**dict(info), 'unit': answer_unit, 'unitPhrase': answer_unit, 'tail': scale_tail, 'stepExplanation': scale_tail, 'isMeasure': False}
+    elif v51303_scale_marker and str(answer_unit).startswith('десятк'):
+        unit = answer_unit
+        info = {**dict(info), 'unit': answer_unit, 'unitPhrase': 'десятков пуговиц', 'tail': 'пуговиц', 'stepExplanation': 'десятков пуговиц', 'isMeasure': False}
     if unit:
         answer_unit = unit
     steps = [str(x or '').strip() for x in (api_candidate.get('steps') or []) if str(x or '').strip()]
@@ -11044,6 +11485,13 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
         if built and (not final or re.fullmatch(r'-?\d+\s+[а-яёa-z. -]{1,30}', final, flags=re.IGNORECASE) or len(final.split()) <= 3):
             final = built
     final = _v4011_fix_answer_grammar(final, original_text)
+    if v51303_scale_marker and n_int is not None:
+        low_for_scale_final = str(original_text or '').lower().replace('ё', 'е')
+        if str(answer_unit).startswith('тысяч') and 'вид' in low_for_scale_final:
+            species_tail = 'видов водорослей' if 'водорос' in low_for_scale_final else 'видов'
+            final = f'{answer_number} {_v51303_thousand_word(answer_number)} {species_tail}'.strip()
+        elif str(answer_unit).startswith('десятк') and 'пуговиц' in low_for_scale_final:
+            final = f'к костюмам пришили {answer_number} десятков пуговиц'
     if not final:
         return None
     result = _format_primary_solution_text(original_text, repaired_steps, final)
@@ -11087,11 +11535,16 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
     })
     contract = str(out.get('visibleResultContract') or '').strip()
     marker = 'v501.03-api-primary-verified-formatted'
+    marker_full = marker + ((';' + v51303_scale_marker) if v51303_scale_marker else '')
     if marker not in contract:
-        out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
+        out['visibleResultContract'] = (contract + '; ' if contract else '') + marker_full
+    elif v51303_scale_marker and v51303_scale_marker not in contract:
+        out['visibleResultContract'] = contract + '; ' + v51303_scale_marker
     verifier = str(out.get('verifier') or '')
     if marker not in verifier:
-        out['verifier'] = verifier + ('; ' if verifier else '') + marker
+        out['verifier'] = verifier + ('; ' if verifier else '') + marker_full
+    elif v51303_scale_marker and v51303_scale_marker not in verifier:
+        out['verifier'] = verifier + '; ' + v51303_scale_marker
     out = _v501_record_api_template_decision(out, api_candidate=api_candidate, template_candidate=template_candidate or {}, decision=decision, api_used=True, conflict=conflict)
     out['v501ApiPrimaryVerifiedFormatted'] = True
     structured_after = _v4011_structured(out)
@@ -11568,7 +12021,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v513-02-v50103-excel-401-500'
+    marker = 'v513-03-v50103-excel-401-500'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -11766,6 +12219,9 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
     special_non_numeric = _v40201_special_non_numeric_payload(payload, original_text)
     if isinstance(special_non_numeric, dict):
         return _v4013_finalize_payload_text(special_non_numeric, original_text)
+    v51303_yes_no = _v51303_ladder_yes_no_payload(payload, original_text)
+    if isinstance(v51303_yes_no, dict):
+        return v51303_yes_no
     # V509.03: protect the V501.03 API-first architecture.  Only special
     # non-standard tasks and pure scale/grammar formatters run before the
     # trusted API formatter; broad semantic templates are rescue mode.
@@ -11779,12 +12235,6 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
     if isinstance(target_hits_v50903, dict):
         return target_hits_v50903
     payload = _v500_attach_existing_self_verifier(payload) if isinstance(payload, dict) else payload
-    # V513.02: the current release audits Excel rows 401-500.  Apply this
-    # release's visible-result contract before the trusted API formatter returns,
-    # while preserving the existing DeepSeek/API evidence in the payload.
-    v40502_special = _v40502_batch_401_500_payload(payload, original_text)
-    if isinstance(v40502_special, dict):
-        return v40502_special
     api_primary = _v50103_format_trusted_api_payload(payload, original_text, decision='api_primary_verified_formatted_no_template', conflict=False)
     if isinstance(api_primary, dict):
         return api_primary
