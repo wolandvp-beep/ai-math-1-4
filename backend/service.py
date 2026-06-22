@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v513_03_v50103_excel_401_500'
-SOLVER_VERSION = 'v513-03-v50103-excel-401-500'
+APP_RELEASE = 'v513_04_v50103_excel_401_500'
+SOLVER_VERSION = 'v513-04-v50103-excel-401-500'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -833,7 +833,7 @@ def _postprocess_deepseek_primary_payload(payload: dict, original_text: str) -> 
         # V513.02: keep the API arithmetic locked, but still run safe visible-format
         # repairs and explicit yes/no deficit extraction.  This does not invoke broad
         # semantic templates, so the V501 API-first architecture remains protected.
-        locked_yes_no = _v51303_ladder_yes_no_payload(cleaned, original_text)
+        locked_yes_no = _v51302_ladder_yes_no_payload(cleaned, original_text)
         if isinstance(locked_yes_no, dict):
             cleaned = locked_yes_no
         else:
@@ -855,8 +855,9 @@ def _postprocess_deepseek_primary_payload(payload: dict, original_text: str) -> 
         postprocess_replacements.append({'stage': 'normalize_deepseek_result_text', 'before': before_norm, 'after': _v501_compact_payload_snapshot(cleaned)})
     else:
         cleaned['result'] = result
-    if _v51303_polish_payload_in_place(cleaned, original_text):
-        postprocess_replacements.append({'stage': 'v51303_final_ui_polish', 'before': repaired_after, 'after': _v501_compact_payload_snapshot(cleaned)})
+    before_v51304 = _v501_compact_payload_snapshot(cleaned)
+    if _v51304_repair_visible_text_in_place(cleaned, original_text):
+        postprocess_replacements.append({'stage': 'v51304_final_ui_safe_polish', 'before': before_v51304, 'after': _v501_compact_payload_snapshot(cleaned)})
         result = str(cleaned.get('result') or '').strip()
     source = str(cleaned.get('source') or '')
     if not result or 'Ответ:' not in result:
@@ -2019,7 +2020,7 @@ def _v4012_paren_unit(unit: str, info: dict[str, str | bool] | None = None) -> s
 
 
 
-def _v51303_total_object_phrase(info: dict[str, str | bool] | None, original_text: str = '') -> str:
+def _v51302_total_object_phrase(info: dict[str, str | bool] | None, original_text: str = '') -> str:
     if not isinstance(info, dict):
         return ''
     phrase = _v4011_clean_phrase(str(info.get('unitPhrase') or info.get('unit') or ''))
@@ -2030,7 +2031,7 @@ def _v51303_total_object_phrase(info: dict[str, str | bool] | None, original_tex
     return _v4011_strip_total(object_part or phrase).strip()
 
 
-def _v51303_insert_total_word(answer: str) -> str:
+def _v51302_insert_total_word(answer: str) -> str:
     text = _v4011_clean_phrase(str(answer or ''))
     if not text or re.search(r'\bвсего\b', text, flags=re.IGNORECASE):
         return text
@@ -2038,7 +2039,7 @@ def _v51303_insert_total_word(answer: str) -> str:
     return re.sub(r'(?<!\d)(-?\d+(?:[,.]\d+)?)', r'всего \1', text, count=1)
 
 
-def _v51303_thousand_word(number: int | str) -> str:
+def _v51302_thousand_word(number: int | str) -> str:
     try:
         n = abs(int(number))
     except Exception:
@@ -2054,19 +2055,19 @@ def _v51303_thousand_word(number: int | str) -> str:
     return 'тысяч'
 
 
-def _v51303_short_count_phrase(current_answer: str, number: int, fallback: str) -> str:
+def _v51302_short_count_phrase(current_answer: str, number: int, fallback: str) -> str:
     current = _v4011_clean_phrase(str(current_answer or ''))
     if re.fullmatch(rf'{number}\s+[А-ЯЁа-яёa-z. -]{{2,60}}', current, flags=re.IGNORECASE):
         return current
     return fallback
 
 
-def _v51303_refine_step_explanation(original_text: str, info: dict[str, str | bool], op: str, result: str, answer_number: str, existing_expl: str, generated_expl: str, paren_unit: str) -> str:
+def _v51302_refine_step_explanation(original_text: str, info: dict[str, str | bool], op: str, result: str, answer_number: str, existing_expl: str, generated_expl: str, paren_unit: str) -> str:
     task_low = str(original_text or '').lower().replace('ё', 'е')
     qlow = _v4015_last_question_sentence(original_text).lower().replace('ё', 'е')
     expl = _v4011_clean_phrase(str(existing_expl or '')).strip()
     generated = _v4011_clean_phrase(str(generated_expl or '')).strip()
-    object_phrase = _v51303_total_object_phrase(info, original_text)
+    object_phrase = _v51302_total_object_phrase(info, original_text)
     if bool(info.get('isMeasure')):
         measure_phrase = _v4011_clean_phrase(str(info.get('stepExplanation') or info.get('tail') or ''))
         if measure_phrase and _v4011_norm_key(measure_phrase) not in {'кг', 'г', 'см', 'м', 'км', 'л', 'ч', 'мин'}:
@@ -2117,7 +2118,7 @@ def _v51303_refine_step_explanation(original_text: str, info: dict[str, str | bo
     return expl or generated or object_phrase or 'величина'
 
 
-def _v51303_rescale_school_numbers(text: str, divisor: int) -> str:
+def _v51302_rescale_school_numbers(text: str, divisor: int) -> str:
     if divisor <= 1:
         return str(text or '')
     def repl(match: re.Match[str]) -> str:
@@ -2132,7 +2133,7 @@ def _v51303_rescale_school_numbers(text: str, divisor: int) -> str:
     return re.sub(r'(?<!\d)\d+(?!\d)', repl, str(text or ''))
 
 
-def _v51303_rescale_step_if_scaled(text: str, divisor: int) -> str:
+def _v51302_rescale_step_if_scaled(text: str, divisor: int) -> str:
     """Rescale a calculation line only when the whole equation is written in base units.
 
     If the API already wrote the arithmetic in scaled units (e.g. 4 + 6 = 10
@@ -2146,11 +2147,11 @@ def _v51303_rescale_step_if_scaled(text: str, divisor: int) -> str:
     if not nums:
         return raw
     if all((n == 0 or n % divisor == 0) for n in nums) and max(nums) >= divisor * 2:
-        return _v51303_rescale_school_numbers(raw, divisor)
+        return _v51302_rescale_school_numbers(raw, divisor)
     return raw
 
 
-def _v51303_scale_normalize_api_candidate(original_text: str, api_candidate: dict[str, Any]) -> tuple[dict[str, Any], str]:
+def _v51302_scale_normalize_api_candidate(original_text: str, api_candidate: dict[str, Any]) -> tuple[dict[str, Any], str]:
     if not isinstance(api_candidate, dict):
         return api_candidate, ''
     low = str(original_text or '').lower().replace('ё', 'е')
@@ -2173,13 +2174,13 @@ def _v51303_scale_normalize_api_candidate(original_text: str, api_candidate: dic
     out['answerNumber'] = str(n // divisor)
     if scale_unit:
         out['answerUnit'] = scale_unit
-    out['finalAnswer'] = _v51303_rescale_school_numbers(str(out.get('finalAnswer') or ''), divisor)
+    out['finalAnswer'] = _v51302_rescale_school_numbers(str(out.get('finalAnswer') or ''), divisor)
     steps = out.get('steps') if isinstance(out.get('steps'), list) else []
-    out['steps'] = [_v51303_rescale_step_if_scaled(str(step or ''), divisor) for step in steps]
-    return out, f'v51303-scale-normalized-{divisor}'
+    out['steps'] = [_v51302_rescale_step_if_scaled(str(step or ''), divisor) for step in steps]
+    return out, f'v51302-scale-normalized-{divisor}'
 
 
-def _v51303_ladder_yes_no_payload(payload: dict[str, Any] | None, original_text: str) -> dict[str, Any] | None:
+def _v51302_ladder_yes_no_payload(payload: dict[str, Any] | None, original_text: str) -> dict[str, Any] | None:
     text = str(original_text or '')
     low = text.lower().replace('ё', 'е')
     if 'можно ли' not in low or not re.search(r'крыши|крышу|достать|хватит', low):
@@ -2210,24 +2211,24 @@ def _v51303_ladder_yes_no_payload(payload: dict[str, Any] | None, original_text:
         'userVisibleResultText': _v312_format_visible_result(steps, final_answer, text) or result,
         'backendPreparedVisibleResult': True,
         'validated': True,
-        'source': str(out.get('source') or 'deepseek-primary') + '; v51303-general-yes-no-length-deficit',
+        'source': str(out.get('source') or 'deepseek-primary') + '; v51302-general-yes-no-length-deficit',
         'answer': final_answer,
         'answer_number': str(diff),
         'answer_unit': 'м',
         'final_answer': final_answer,
         'structured_solution': {**_v4011_structured(out), 'steps': steps, 'answer_number': str(diff), 'answer_unit': 'м', 'final_answer': final_answer, 'v500UsesExcelExpected': False, 'v500CaseSpecificRepair': False},
-        'v51303YesNoLengthDeficit': True,
+        'v51302YesNoLengthDeficit': True,
     })
     out['structuredSolution'] = out['structured_solution']
     return _v4013_finalize_payload_text(out, text)
 
 
-def _v51303_movement_phrase(original_text: str) -> str:
-    """Reusable UI phrase for distance/time step explanations without changing arithmetic."""
+def _v51304_movement_phrase(original_text: str) -> str:
+    """Conservative movement phrase for bare distance-step labels."""
     src = _v4011_clean_phrase(str(original_text or '')).lower().replace('ё', 'е')
     patterns = (
         r'\b(прошли|проехали|пролетели|проплыли|пробежали)\s+([а-яё]+)',
-        r'\b(прошел|прошла|проехал|проехала|пролетел|пролетела|проплыл|проплыла|пробежал|пробежала)\s+([а-яё]+)',
+        r'\b(прошел|прошла|проехал|проехала|пролетел|пролетела|проплыл|проплыла|пробежал|пробежала|проползла|прополз)\s+([а-яё]+)',
     )
     for pattern in patterns:
         m = re.search(pattern, src, flags=re.IGNORECASE)
@@ -2238,127 +2239,49 @@ def _v51303_movement_phrase(original_text: str) -> str:
     return ''
 
 
-def _v51303_explanation_for_bare_measure_tail(original_text: str, tail: str, info: dict[str, str | bool]) -> str:
-    tail_clean = _v4011_clean_phrase(str(tail or ''))
-    tail_clean = re.sub(r'^(?:км|м|см|дм|мм|кг|г|л|ч|мин|час(?:а|ов)?|километр(?:а|ов)?|метр(?:а|ов)?|килограмм(?:а|ов)?)\s+', '', tail_clean, flags=re.IGNORECASE).strip()
-    movement = _v51303_movement_phrase(original_text)
-    if tail_clean:
-        if movement and re.match(r'^(?:в|во|на|за|к|ко|до|после|перед)\b', tail_clean, flags=re.IGNORECASE):
-            return _v4013_capitalize_known_names(f'{movement} {tail_clean}', original_text)
-        if movement and re.search(r'\b(?:первый|первую|второй|вторую|третий|третью|день|дня|неделю|месяц)\b', tail_clean, flags=re.IGNORECASE):
-            prep = '' if re.match(r'^(?:в|во|на|за)\b', tail_clean, flags=re.IGNORECASE) else 'в '
-            return _v4013_capitalize_known_names(f'{movement} {prep}{tail_clean}'.strip(), original_text)
-        return _v4013_capitalize_known_names(tail_clean, original_text)
-    generated = _v4011_clean_phrase(str(info.get('stepExplanation') or info.get('tail') or '')) if isinstance(info, dict) else ''
-    return _v4013_capitalize_known_names(generated or movement or 'величина', original_text)
-
-
-def _v51303_repair_bare_measure_equation_line(line: str, original_text: str, answer_number: str = '', answer_unit: str = '') -> str:
-    raw = str(line or '')
-    if not raw.strip() or '(' in raw or '–' in raw or '—' in raw:
-        return _v4013_capitalize_known_names(raw, original_text)
-    unit, info = _v500_answer_unit_and_info(original_text, answer_unit)
-    paren_unit = _v4012_paren_unit(unit or answer_unit, info)
-    if not paren_unit or paren_unit in {'шт.', 'чел.'}:
-        return _v4013_capitalize_known_names(raw, original_text)
-    numbered = re.match(r'^(?P<num>\s*\d+[\).]\s*)(?P<body>.+)$', raw)
-    prefix = numbered.group('num') if numbered else ''
-    body = numbered.group('body') if numbered else raw
-    m = re.match(
-        r'^(?P<expr>\s*-?\d+\s*(?:[+\-−·×xх*/:÷])\s*-?\d+\s*=\s*(?P<res>-?\d+))(?:\s*(?P<tail>[^.!?\n]*))(?P<punct>[.!?]?)\s*$',
-        body,
-        flags=re.IGNORECASE,
-    )
-    if not m:
-        return _v4013_capitalize_known_names(raw, original_text)
-    tail = str(m.group('tail') or '')
-    if '(' in tail or '–' in tail or '—' in tail:
-        return _v4013_capitalize_known_names(raw, original_text)
-    expr = re.sub(r'\s+', ' ', m.group('expr')).strip()
-    # If the bare tail begins with a written unit, remove only that unit from the explanation.
-    expl = _v51303_explanation_for_bare_measure_tail(original_text, tail, info)
-    punct = m.group('punct') or ''
-    fixed = f'{prefix}{expr} ({paren_unit}) – {expl}{punct}'.strip()
-    return _v4013_capitalize_known_names(fixed, original_text)
-
-
-
-
-def _v51303_refine_short_measure_day_dash_text(text: str, original_text: str, answer_unit: str = '') -> str:
-    if not isinstance(text, str) or not text:
-        return text
-    unit, info = _v500_answer_unit_and_info(original_text, answer_unit)
-    paren_unit = _v4012_paren_unit(unit or answer_unit, info)
-    if not paren_unit or paren_unit in {'шт.', 'чел.'}:
-        return _v4013_capitalize_known_names(text, original_text)
-    movement = _v51303_movement_phrase(original_text)
+def _v51304_measure_day_explanation(original_text: str, expl: str) -> str:
+    """Add the actor/action back to terse labels like «во второй день»."""
+    clean = _v4011_clean_phrase(str(expl or ''))
+    if not clean:
+        return clean
+    low = clean.lower().replace('ё', 'е')
+    if not re.search(r'\b(?:перв(?:ый|ую|ые|ого)|втор(?:ой|ую|ые|ого)|трет(?:ий|ью|ьи|ьего)|четверт\w+|пят\w+)\s+д(?:ень|ня)\b', low):
+        return clean
+    movement = _v51304_movement_phrase(original_text)
     if not movement:
-        return _v4013_capitalize_known_names(text, original_text)
-
-    def repl(match: re.Match[str]) -> str:
-        prefix = match.group('prefix')
-        phrase = _v4011_clean_phrase(match.group('phrase'))
-        low = phrase.lower().replace('ё', 'е')
-        if low.startswith('втор'):
-            prep_phrase = 'во ' + phrase
-        elif re.match(r'^(?:в|во|на|за)\b', low):
-            prep_phrase = phrase
-        else:
-            prep_phrase = 'в ' + phrase
-        return prefix + _v4013_capitalize_known_names(f'{movement} {prep_phrase}', original_text)
-
-    fixed = re.sub(
-        r'(?P<prefix>\((?:мм|см|дм|м|км|кг|г|л|ч|мин|час|метр|километр)[^)]*\)\s*[—–-]\s*)(?P<phrase>(?:перв(?:ый|ую)|втор(?:ой|ую)|трет(?:ий|ью)|четверт\w+|пят\w+)\s+день)\b',
-        repl,
-        text,
-        flags=re.IGNORECASE,
-    )
-    return _v4013_capitalize_known_names(fixed, original_text)
-def _v51303_repair_bare_measure_equations_text(text: str, original_text: str, answer_number: str = '', answer_unit: str = '') -> str:
-    if not isinstance(text, str) or not text:
-        return text
-    parts = text.split('\n')
-    fixed_parts = [_v51303_repair_bare_measure_equation_line(part, original_text, answer_number, answer_unit) for part in parts]
-    fixed = '\n'.join(fixed_parts)
-    fixed = _v51303_refine_short_measure_day_dash_text(fixed, original_text, answer_unit)
-    # One more pass for names because some visible fields are built outside structured_solution.
-    return _v4013_capitalize_known_names(fixed, original_text)
+        return clean
+    if low.startswith('втор'):
+        clean = 'во ' + clean
+    elif not re.match(r'^(?:в|во|на|за)\b', low):
+        clean = 'в ' + clean
+    return _v4013_capitalize_known_names(f'{movement} {clean}', original_text)
 
 
-def _v51303_polish_payload_in_place(out: dict[str, Any], original_text: str) -> bool:
-    """Final V513.03 UI-only polish: names capitalization + bare measure equation formatting.
-
-    It deliberately does not change answer_number or arithmetic.  It only edits visible
-    strings after the trusted API/template decision has already been made.
-    """
-    if not isinstance(out, dict):
+def _v51304_capitalize_visible_names_in_place(out: dict[str, Any], original_text: str) -> bool:
+    """UI-only: preserve uppercase proper names from the task after final sync."""
+    if not isinstance(out, dict) or not _v4013_known_name_map(original_text):
         return False
     changed = False
-    structured = _v4011_structured(out)
-    answer_number = str(out.get('answer_number') or structured.get('answer_number') or '').strip()
-    answer_unit = str(out.get('answer_unit') or structured.get('answer_unit') or '').strip()
     for key in ('result', 'explanation', 'userVisibleResultText', 'answer', 'final_answer'):
         if isinstance(out.get(key), str):
             old = out[key]
-            new = _v51303_repair_bare_measure_equations_text(old, original_text, answer_number, answer_unit)
+            new = _v4013_capitalize_known_names(old, original_text)
             if new != old:
                 out[key] = new
                 changed = True
+    structured = _v4011_structured(out)
     if isinstance(structured, dict) and structured:
         st = dict(structured)
         if isinstance(st.get('final_answer'), str):
-            old_final = st['final_answer']
-            new_final = _v4013_capitalize_known_names(old_final, original_text)
-            if new_final != old_final:
-                st['final_answer'] = new_final
+            old = st['final_answer']
+            new = _v4013_capitalize_known_names(old, original_text)
+            if new != old:
+                st['final_answer'] = new
                 changed = True
         if isinstance(st.get('steps'), list):
             new_steps = []
             for step in st.get('steps') or []:
-                if isinstance(step, str):
-                    new_steps.append(_v51303_repair_bare_measure_equations_text(step, original_text, answer_number, answer_unit))
-                else:
-                    new_steps.append(step)
+                new_steps.append(_v4013_capitalize_known_names(step, original_text) if isinstance(step, str) else step)
             if new_steps != st.get('steps'):
                 st['steps'] = new_steps
                 changed = True
@@ -2366,12 +2289,19 @@ def _v51303_polish_payload_in_place(out: dict[str, Any], original_text: str) -> 
             out['structured_solution'] = st
             out['structuredSolution'] = st
     if changed:
-        out['v51303UiPolish'] = True
         contract = str(out.get('visibleResultContract') or '').strip()
-        if 'v513.03-ui-polish' not in contract:
-            out['visibleResultContract'] = (contract + '; ' if contract else '') + 'v513.03-ui-polish'
-        out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + 'v513.03-ui-polish'
+        marker = 'v513.04-proper-name-case-preserved'
+        if marker not in contract:
+            out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
+        out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + marker
     return changed
+
+
+def _v51304_repair_visible_text_in_place(out: dict[str, Any], original_text: str) -> bool:
+    """Final conservative V513.04 UI repair without rebuilding arithmetic or answers."""
+    changed = _v51304_capitalize_visible_names_in_place(out, original_text)
+    return changed
+
 
 def _v4012_count_object_phrase(info: dict[str, str | bool] | None) -> str:
     if not isinstance(info, dict):
@@ -4160,7 +4090,7 @@ def _v4011_build_final_answer(original_text: str, number: int, info: dict[str, s
     if not bool(info.get('isMeasure')):
         qlow = _v4015_last_question_sentence(original_text).lower().replace('ё', 'е')
         object_phrase_for_answer = _v4011_phrase_with_number(number, unit_phrase or unit, unit)
-        short_object_phrase_for_answer = _v51303_short_count_phrase(current, number, object_phrase_for_answer)
+        short_object_phrase_for_answer = _v51302_short_count_phrase(current, number, object_phrase_for_answer)
         m_total_bilo = re.search(r'сколько\s+всего\s+(.+?)\s+было\s+(.+?)[?.!]*$', qlow)
         if m_total_bilo:
             context = _v4013_capitalize_known_names(_v4011_clean_phrase(m_total_bilo.group(2)), original_text)
@@ -4215,13 +4145,13 @@ def _v4011_build_final_answer(original_text: str, number: int, info: dict[str, s
         object_phrase = _v4011_phrase_with_number(number, unit_phrase or unit, unit)
         counted_answer = _v4015_counted_final_answer(subject, verb, rest, number, object_phrase, original_text)
         if bool(info.get('totalPrefix')) and not re.search(r'\bвсего\b', counted_answer, flags=re.IGNORECASE):
-            counted_answer = _v51303_insert_total_word(counted_answer)
+            counted_answer = _v51302_insert_total_word(counted_answer)
         return counted_answer
     if verb:
         object_phrase = _v4011_phrase_with_number(number, unit_phrase or unit, unit)
         counted_answer = _v4015_counted_final_answer(subject, verb, '', number, object_phrase, original_text)
         if bool(info.get('totalPrefix')) and not re.search(r'\bвсего\b', counted_answer, flags=re.IGNORECASE):
-            counted_answer = _v51303_insert_total_word(counted_answer)
+            counted_answer = _v51302_insert_total_word(counted_answer)
         return counted_answer
     object_part, prep, context = _v4011_split_object_context(tail or unit_phrase)
     object_phrase = _v4011_phrase_with_number(number, object_part or unit_phrase or unit, unit)
@@ -4343,18 +4273,19 @@ def _v4011_normalize_step_line(step: str, original_text: str, answer_number: str
             unit_keys = {old_unit, desired_unit, _v4011_norm_key(_v4011_abbrev(old_unit)), _v4011_norm_key(_v4011_abbrev(desired_unit))}
             bad_explanation = (not old_expl_key) or old_expl_key in unit_keys or old_expl_key in _V4013_SUBJECT_PRONOUNS or old_expl_key.endswith(' он') or old_expl_key.endswith(' она')
             if old_unit != desired_unit or bad_explanation or (old_expl != desired_expl and (bool(info.get('isMeasure')) or _v4012_is_counted_piece_unit(unit, info))):
-                fixed_expl = _v51303_refine_step_explanation(original_text, info, op, result, answer_number, old_expl, explanation, paren_unit)
+                fixed_expl = _v51302_refine_step_explanation(original_text, info, op, result, answer_number, old_expl, explanation, paren_unit)
                 return f'{expr} ({paren_unit}) – {fixed_expl}'.strip()
         return _v4011_fix_answer_grammar(clean, original_text)
     if paren_unit:
         expr = re.sub(r'\s+', ' ', m.group('expr')).strip()
         expr = re.sub(r'\s+[а-яa-zё.²³]+$', '', expr, flags=re.IGNORECASE)
         tail_hint = _v4011_clean_phrase(re.sub(r'^[\s,;:–—-]+', '', str(m.group('tail') or '')))
-        # V513.03: strip only a duplicated written unit after the result, not a
-        # useful preposition such as «во второй день».  The previous broad regex
-        # removed «во» and left too-short explanations like «день».
+        # V513.04: strip only duplicated written units after the result.  Do not
+        # remove useful prepositions such as «во» from «во второй день».
         tail_hint = re.sub(r'^\(?(?:мм|см|дм|м|км|кг|г|л|ч|мин|час(?:а|ов)?|километр(?:а|ов)?|метр(?:а|ов)?|килограмм(?:а|ов)?|литр(?:а|ов)?|руб(?:\.|ля|лей)?|коп(?:\.|ейки|еек)?)\)?\s+', '', tail_hint, flags=re.IGNORECASE).strip()
-        fixed_expl = _v51303_refine_step_explanation(original_text, info, op, result, answer_number, tail_hint, explanation, paren_unit)
+        fixed_expl = _v51302_refine_step_explanation(original_text, info, op, result, answer_number, tail_hint, explanation, paren_unit)
+        if bool(info.get('isMeasure')):
+            fixed_expl = _v51304_measure_day_explanation(original_text, fixed_expl)
         return f'{expr} ({paren_unit}) – {fixed_expl}'.strip()
     return _v4011_fix_answer_grammar(clean, original_text)
 
@@ -4700,14 +4631,9 @@ def _v4013_finalize_payload_text(out: dict[str, Any], original_text: str) -> dic
     if changed:
         fixed['v4013RussianGrammarRepaired'] = True
         fixed['verifier'] = str(fixed.get('verifier') or '') + ('; ' if fixed.get('verifier') else '') + 'v401.12-russian-grammar-repair'
-    v51303_changed = _v51303_polish_payload_in_place(fixed, original_text)
-    if v51303_changed:
-        fixed['v4013RussianGrammarRepaired'] = True
     sync_changed = _v40208_sync_user_visible_result_text(fixed, original_text)
-    if sync_changed:
-        # Sync can rebuild userVisibleResultText from structured steps; polish it once more.
-        if _v51303_polish_payload_in_place(fixed, original_text):
-            fixed['v4013RussianGrammarRepaired'] = True
+    if _v51304_capitalize_visible_names_in_place(fixed, original_text):
+        fixed['v4013RussianGrammarRepaired'] = True
     if sync_changed:
         fixed['v4013RussianGrammarRepaired'] = True
     return fixed
@@ -11448,21 +11374,21 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
     api_candidate = api_candidate or _v501_raw_api_answer_candidate(payload)
     if not isinstance(api_candidate, dict) or not api_candidate.get('trusted'):
         return None
-    api_candidate, v51303_scale_marker = _v51303_scale_normalize_api_candidate(original_text, api_candidate)
+    api_candidate, v51302_scale_marker = _v51302_scale_normalize_api_candidate(original_text, api_candidate)
     answer_number = _v501_normalize_answer_number(api_candidate.get('answerNumber'))
     if not answer_number:
         return None
     n_int = _v4011_int_number(answer_number)
     answer_unit = str(api_candidate.get('answerUnit') or payload.get('answer_unit') or '').strip()
     unit, info = _v500_answer_unit_and_info(original_text, answer_unit)
-    if v51303_scale_marker and str(answer_unit).startswith('тысяч'):
+    if v51302_scale_marker and str(answer_unit).startswith('тысяч'):
         unit = answer_unit
         low_for_scale_info = str(original_text or '').lower().replace('ё', 'е')
         scale_tail = 'видов'
         if 'водорос' in low_for_scale_info:
             scale_tail = 'видов водорослей'
         info = {**dict(info), 'unit': answer_unit, 'unitPhrase': answer_unit, 'tail': scale_tail, 'stepExplanation': scale_tail, 'isMeasure': False}
-    elif v51303_scale_marker and str(answer_unit).startswith('десятк'):
+    elif v51302_scale_marker and str(answer_unit).startswith('десятк'):
         unit = answer_unit
         info = {**dict(info), 'unit': answer_unit, 'unitPhrase': 'десятков пуговиц', 'tail': 'пуговиц', 'stepExplanation': 'десятков пуговиц', 'isMeasure': False}
     if unit:
@@ -11485,11 +11411,11 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
         if built and (not final or re.fullmatch(r'-?\d+\s+[а-яёa-z. -]{1,30}', final, flags=re.IGNORECASE) or len(final.split()) <= 3):
             final = built
     final = _v4011_fix_answer_grammar(final, original_text)
-    if v51303_scale_marker and n_int is not None:
+    if v51302_scale_marker and n_int is not None:
         low_for_scale_final = str(original_text or '').lower().replace('ё', 'е')
         if str(answer_unit).startswith('тысяч') and 'вид' in low_for_scale_final:
             species_tail = 'видов водорослей' if 'водорос' in low_for_scale_final else 'видов'
-            final = f'{answer_number} {_v51303_thousand_word(answer_number)} {species_tail}'.strip()
+            final = f'{answer_number} {_v51302_thousand_word(answer_number)} {species_tail}'.strip()
         elif str(answer_unit).startswith('десятк') and 'пуговиц' in low_for_scale_final:
             final = f'к костюмам пришили {answer_number} десятков пуговиц'
     if not final:
@@ -11535,16 +11461,16 @@ def _v50103_format_trusted_api_payload(payload: dict[str, Any] | None, original_
     })
     contract = str(out.get('visibleResultContract') or '').strip()
     marker = 'v501.03-api-primary-verified-formatted'
-    marker_full = marker + ((';' + v51303_scale_marker) if v51303_scale_marker else '')
+    marker_full = marker + ((';' + v51302_scale_marker) if v51302_scale_marker else '')
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker_full
-    elif v51303_scale_marker and v51303_scale_marker not in contract:
-        out['visibleResultContract'] = contract + '; ' + v51303_scale_marker
+    elif v51302_scale_marker and v51302_scale_marker not in contract:
+        out['visibleResultContract'] = contract + '; ' + v51302_scale_marker
     verifier = str(out.get('verifier') or '')
     if marker not in verifier:
         out['verifier'] = verifier + ('; ' if verifier else '') + marker_full
-    elif v51303_scale_marker and v51303_scale_marker not in verifier:
-        out['verifier'] = verifier + '; ' + v51303_scale_marker
+    elif v51302_scale_marker and v51302_scale_marker not in verifier:
+        out['verifier'] = verifier + '; ' + v51302_scale_marker
     out = _v501_record_api_template_decision(out, api_candidate=api_candidate, template_candidate=template_candidate or {}, decision=decision, api_used=True, conflict=conflict)
     out['v501ApiPrimaryVerifiedFormatted'] = True
     structured_after = _v4011_structured(out)
@@ -12021,7 +11947,7 @@ def _v500_build_payload(payload: dict[str, Any] | None, original_text: str, *, s
         'v500CaseSpecificRepair': False,
     })
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v513-03-v50103-excel-401-500'
+    marker = 'v513-04-v50103-excel-401-500'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     out['verifier'] = str(out.get('verifier') or '') + ('; ' if out.get('verifier') else '') + f'v500-general-rule:{rule}'
@@ -12219,9 +12145,9 @@ def _v4011_repair_payload(payload: dict[str, Any], original_text: str) -> dict[s
     special_non_numeric = _v40201_special_non_numeric_payload(payload, original_text)
     if isinstance(special_non_numeric, dict):
         return _v4013_finalize_payload_text(special_non_numeric, original_text)
-    v51303_yes_no = _v51303_ladder_yes_no_payload(payload, original_text)
-    if isinstance(v51303_yes_no, dict):
-        return v51303_yes_no
+    v51302_yes_no = _v51302_ladder_yes_no_payload(payload, original_text)
+    if isinstance(v51302_yes_no, dict):
+        return v51302_yes_no
     # V509.03: protect the V501.03 API-first architecture.  Only special
     # non-standard tasks and pure scale/grammar formatters run before the
     # trusted API formatter; broad semantic templates are rescue mode.
