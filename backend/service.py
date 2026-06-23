@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v525_01_v50103_excel_1601_1700'
-SOLVER_VERSION = 'v525-01-v50103-excel-1601-1700'
+APP_RELEASE = 'v525_02_v50103_excel_1601_1700'
+SOLVER_VERSION = 'v525-02-v50103-excel-1601-1700'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
