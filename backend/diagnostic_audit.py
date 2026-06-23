@@ -121,7 +121,7 @@ def _excel_visible_step_unit_explanation_issues(case: dict[str, Any], result: st
         measurement = {
             'кг', 'г', 'гр', 'км', 'м', 'дм', 'см', 'мм', 'л', 'литр', 'литра', 'литров', 'т', 'тонна', 'тонны', 'тонн', 'килограмм', 'килограмма', 'килограммов', 'грамм', 'грамма', 'граммов', 'километр', 'километра', 'километров', 'метр', 'метра', 'метров', 'сантиметр', 'сантиметра', 'сантиметров',
             'руб', 'рубль', 'рубля', 'рублей', 'долл', 'долл.', 'доллар', 'доллара', 'долларов', 'коп', 'копейка', 'копейки', 'копеек',
-            'мин', 'минута', 'минуты', 'минут', 'ч', 'час', 'часа', 'часов',
+            'мин', 'минута', 'минуты', 'минут', 'с', 'сек', 'сек.', 'секунда', 'секунды', 'секунд', 'ч', 'час', 'часа', 'часов',
             'сутки', 'суток', 'сут', 'сут.', 'день', 'дня', 'дней', 'д', 'д.', 'дн', 'дн.', 'год', 'года', 'лет', 'месяц', 'месяца', 'месяцев', 'мес', 'мес.', 'раз', 'раза',
         }
         people = {
@@ -309,7 +309,7 @@ def _excel_visible_step_unit_explanation_issues(case: dict[str, Any], result: st
             break
         unit_match = re.search(r'=\s*-?\d+(?:[,.]\d+)?\s*\(([^)]+)\)\s*[—–-]', line)
         unit_text = str(unit_match.group(1) if unit_match else '').lower().replace('ё', 'е')
-        measurement_unit_ok = bool(re.search(r'^(?:кг|г|т|л|м|см|дм|мм|км|руб\.?|коп\.?|мин\.?|ч\.?|час(?:а|ов)?|д\.?|дн\.?|нед\.?|мес\.?|раза?|м/с|км/ч|ц)$', unit_text.strip()))
+        measurement_unit_ok = bool(re.search(r'^(?:кг|г|т|л|м|см|дм|мм|км|руб\.?|коп\.?|мин\.?|ч\.?|час(?:а|ов)?|д\.?|дн\.?|нед\.?|мес\.?|сек\.?|с|раза?|м/с|км/ч|м/мин|м/ч|см/ч|км/д\.?|км/день|ц)$', unit_text.strip()))
         intermediate_person_unit_ok = bool(re.search(r'чел|человек', unit_text))
         if count_unit_kind == 'piece' and 'шт' not in unit_text and not measurement_unit_ok and not intermediate_person_unit_ok:
             issues.append('Excel numeric regression: counted objects must use (шт.) or (тыс. шт.) in visible calculation parentheses')
