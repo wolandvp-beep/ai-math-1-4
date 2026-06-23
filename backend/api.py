@@ -186,7 +186,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('section', 'excel_numeric_regression'),
         ('offset', '1800'),
         ('limit', '100'),
-        ('cacheBust', 'v527-04-v50103-excel-1801-1900'),
+        ('cacheBust', 'v527-05-v50103-excel-1801-1900'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -212,7 +212,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V527.04 — V501.03 architecture / batch 1801–1900 frontend DOM day-speed fix',
+        'nextAuditPlannedMapStep': 'V527.05 — V501.03 architecture / batch 1801–1900 frontend DOM day-speed fix',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -264,7 +264,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v527-04-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v527-05-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3762,7 +3762,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v527-04-v50103-excel-1801-1900-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v527-05-v50103-excel-1801-1900-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -8788,7 +8788,7 @@ def _api_v52703_row_1821_force_day_speed_visible(original_text: str, payload: di
 
 
 def _v52704_force_row1821_visible_text(original_text: str, payload: dict | None) -> dict | None:
-    """V527.04 final text sanitizer for row 1821.
+    """V527.05 final text sanitizer for row 1821.
 
     Live V527.03 proved that some browser-client path still displayed the old
     generic text `80 (шт.) – дня ...`.  This helper works after any formatter:
@@ -8828,11 +8828,11 @@ def _v52704_force_row1821_visible_text(original_text: str, payload: dict | None)
     out['structuredSolution'] = dict(out.get('structured_solution') or {})
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith('guard-low-confidence'):
-        source = 'deepseek-primary; api-primary-verified-formatted-v501.03; v527.04-row-1821-final-text-sanitizer'
-    elif 'v527.04-row-1821-final-text-sanitizer' not in source:
-        source = source + '; v527.04-row-1821-final-text-sanitizer'
+        source = 'deepseek-primary; api-primary-verified-formatted-v501.03; v527.05-row-1821-final-text-sanitizer'
+    elif 'v527.05-row-1821-final-text-sanitizer' not in source:
+        source = source + '; v527.05-row-1821-final-text-sanitizer'
     out['source'] = source
-    marker = 'v527.04-row-1821-final-text-sanitizer'
+    marker = 'v527.05-row-1821-final-text-sanitizer'
     contract = str(out.get('visibleResultContract') or '').strip()
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
@@ -10189,7 +10189,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v527-04-v50103-excel-1801-1900'),
+        ('cacheBust', 'v527-05-v50103-excel-1801-1900'),
     ])
     return {
         **summary,
@@ -12038,7 +12038,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v527-04-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v527-05-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -12385,7 +12385,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v527-04-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v527-05-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:

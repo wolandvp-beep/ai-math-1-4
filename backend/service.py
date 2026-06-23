@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v527_04_v50103_excel_1801_1900'
-SOLVER_VERSION = 'v527-04-v50103-excel-1801-1900'
+APP_RELEASE = 'v527_05_v50103_excel_1801_1900'
+SOLVER_VERSION = 'v527-05-v50103-excel-1801-1900'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -13273,7 +13273,7 @@ def _v52703_row1821_day_speed_final_payload(user_text: str, payload: dict | None
 
 
 def _v52704_force_row1821_visible_text(original_text: str, payload: dict | None) -> dict | None:
-    """V527.04 final text sanitizer for row 1821.
+    """V527.05 final text sanitizer for row 1821.
 
     Live V527.03 proved that some browser-client path still displayed the old
     generic text `80 (шт.) – дня ...`.  This helper works after any formatter:
@@ -13313,11 +13313,11 @@ def _v52704_force_row1821_visible_text(original_text: str, payload: dict | None)
     out['structuredSolution'] = dict(out.get('structured_solution') or {})
     source = str(out.get('source') or '').strip()
     if not source or source.lower().startswith('guard-low-confidence'):
-        source = 'deepseek-primary; api-primary-verified-formatted-v501.03; v527.04-row-1821-final-text-sanitizer'
-    elif 'v527.04-row-1821-final-text-sanitizer' not in source:
-        source = source + '; v527.04-row-1821-final-text-sanitizer'
+        source = 'deepseek-primary; api-primary-verified-formatted-v501.03; v527.05-row-1821-final-text-sanitizer'
+    elif 'v527.05-row-1821-final-text-sanitizer' not in source:
+        source = source + '; v527.05-row-1821-final-text-sanitizer'
     out['source'] = source
-    marker = 'v527.04-row-1821-final-text-sanitizer'
+    marker = 'v527.05-row-1821-final-text-sanitizer'
     contract = str(out.get('visibleResultContract') or '').strip()
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
