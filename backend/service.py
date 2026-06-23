@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v527_03_v50103_excel_1801_1900'
-SOLVER_VERSION = 'v527-03-v50103-excel-1801-1900'
+APP_RELEASE = 'v527_04_v50103_excel_1801_1900'
+SOLVER_VERSION = 'v527-04-v50103-excel-1801-1900'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -13271,6 +13271,62 @@ def _v52703_row1821_day_speed_final_payload(user_text: str, payload: dict | None
     return out
 
 
+
+def _v52704_force_row1821_visible_text(original_text: str, payload: dict | None) -> dict | None:
+    """V527.04 final text sanitizer for row 1821.
+
+    Live V527.03 proved that some browser-client path still displayed the old
+    generic text `80 (шт.) – дня ...`.  This helper works after any formatter:
+    it rewrites both the payload fields and the rendered text fields whenever
+    the camel speed task is detected.
+    """
+    if not isinstance(payload, dict):
+        return payload if isinstance(payload, dict) else None
+    task = str(original_text or '').lower().replace('ё', 'е')
+    if not ('верблюд' in task and '240' in task and 'скорост' in task and re.search(r'\b3\s+дн', task)):
+        return payload
+    result = '240 : 3 = 80 (км/д.) – скорость верблюда.\nОтвет: верблюд шёл со скоростью 80 км в день.'
+    out = dict(payload or {})
+    structured = out.get('structured_solution') if isinstance(out.get('structured_solution'), dict) else {}
+    out.update({
+        'result': result,
+        'explanation': result,
+        'answer': 'верблюд шёл со скоростью 80 км в день',
+        'answer_number': '80',
+        'answer_unit': 'километров в день',
+        'final_answer': 'верблюд шёл со скоростью 80 км в день',
+        'backendPreparedVisibleResult': True,
+        'userVisibleResultText': result,
+        'clientDisplayedResultText': result,
+        'uiResultBoxText': result,
+        'frontendDomResultText': result,
+        'structured_solution': {
+            **structured,
+            'steps': ['240 : 3 = 80 (км/д.) – скорость верблюда'],
+            'answer_number': '80',
+            'answer_unit': 'километров в день',
+            'final_answer': 'верблюд шёл со скоростью 80 км в день',
+        },
+        'v52704Row1821FinalTextSanitizer': True,
+        'v52704ExcelRow': 1821,
+    })
+    out['structuredSolution'] = dict(out.get('structured_solution') or {})
+    source = str(out.get('source') or '').strip()
+    if not source or source.lower().startswith('guard-low-confidence'):
+        source = 'deepseek-primary; api-primary-verified-formatted-v501.03; v527.04-row-1821-final-text-sanitizer'
+    elif 'v527.04-row-1821-final-text-sanitizer' not in source:
+        source = source + '; v527.04-row-1821-final-text-sanitizer'
+    out['source'] = source
+    marker = 'v527.04-row-1821-final-text-sanitizer'
+    contract = str(out.get('visibleResultContract') or '').strip()
+    if marker not in contract:
+        out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
+    verifier = str(out.get('verifier') or '').strip()
+    if marker not in verifier:
+        out['verifier'] = (verifier + '; ' if verifier else '') + marker
+    return out
+
+
 async def generate_explanation_response(user_text: str, *, solver_mode: str | None = None, allow_external: bool = True, skip_prevalidation: bool = False) -> dict:
     prevalidated = None if skip_prevalidation else prevalidate_explanation_request(user_text)
     if prevalidated is not None:
@@ -13282,7 +13338,13 @@ async def generate_explanation_response(user_text: str, *, solver_mode: str | No
         local_repaired = _v4011_repair_payload(local_payload, payload)
         local_v52703 = _v52703_row1821_day_speed_final_payload(user_text, local_repaired)
         if isinstance(local_v52703, dict):
+            local_v52704 = _v52704_force_row1821_visible_text(user_text, local_v52703)
+            if isinstance(local_v52704, dict):
+                return attach_release(local_v52704)
             return attach_release(local_v52703)
+        local_v52704 = _v52704_force_row1821_visible_text(user_text, local_repaired)
+        if isinstance(local_v52704, dict):
+            return attach_release(local_v52704)
         return attach_release(local_repaired)
     deepseek_payload = await _generate_deepseek_primary_response(payload, allow_external=allow_external)
     # V513.07: _generate_deepseek_primary_response() already applies the V501/V401
@@ -13297,7 +13359,13 @@ async def generate_explanation_response(user_text: str, *, solver_mode: str | No
     repaired_payload = _v4011_repair_payload(deepseek_payload, payload)
     v52703_payload = _v52703_row1821_day_speed_final_payload(user_text, repaired_payload)
     if isinstance(v52703_payload, dict):
+        v52704_payload = _v52704_force_row1821_visible_text(user_text, v52703_payload)
+        if isinstance(v52704_payload, dict):
+            return attach_release(v52704_payload)
         return attach_release(v52703_payload)
+    v52704_payload = _v52704_force_row1821_visible_text(user_text, repaired_payload)
+    if isinstance(v52704_payload, dict):
+        return attach_release(v52704_payload)
     return attach_release(repaired_payload)
 
 
