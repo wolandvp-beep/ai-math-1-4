@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v529_04_v50103_excel_2001_2100'
-SOLVER_VERSION = 'v529-04-v50103-excel-2001-2100'
+APP_RELEASE = 'v530_01_v50103_excel_2101_2200'
+SOLVER_VERSION = 'v530-01-v50103-excel-2101-2200'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -2088,6 +2088,21 @@ def _v52904_rate_unit_parts(unit: str) -> tuple[str, str] | None:
 def _v52904_rate_unit_abbrev(unit: str) -> str:
     parts = _v52904_rate_unit_parts(unit)
     return f'{parts[0]}/{parts[1]}' if parts else ''
+
+
+def _v53001_power_measure_unit_abbrev(unit: str) -> str:
+    """Return a canonical square/cubic metric unit or an empty string.
+
+    This is deliberately a measurement-level rule rather than a task-specific
+    guard: legacy spellings such as ``см2``, ``м^2``, ``куб. дм`` and their
+    superscript forms all denote measurements and must never be rewritten as
+    counted objects ``(шт.)`` by backend or frontend validators.
+    """
+    raw = _format_power_units_text(str(unit or '').strip().lower().replace('ё', 'е'))
+    raw = raw.strip('()[]{} \t\r\n.,;:!?')
+    raw = re.sub(r'\s+', '', raw)
+    match = re.fullmatch(r'(мм|см|дм|м|км)([²³])', raw)
+    return f'{match.group(1)}{match.group(2)}' if match else ''
 
 
 def _v52904_is_speed_question(text: str) -> bool:

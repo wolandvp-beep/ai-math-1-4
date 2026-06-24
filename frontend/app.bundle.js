@@ -1,5 +1,5 @@
 (() => {
-  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v529_04_v50103_excel_2001_2100";
+  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v530_01_v50103_excel_2101_2200";
   // src/i18n/ru.js
   var ru = {
     "app.name": "\u041C\u0430\u0442\u0435\u043C\u0430\u0442\u0438\u0447\u043A\u0430",
@@ -1073,7 +1073,7 @@
     DEFAULT_LANGUAGE: "ru",
     ENABLE_DEMO_FALLBACK: true
   };
-  var EXPECTED_BACKEND_RELEASE = "v529_04_v50103_excel_2001_2100";
+  var EXPECTED_BACKEND_RELEASE = "v530_01_v50103_excel_2101_2200";
 
   // src/storage/installIdStorage.js
   var KEY5 = "matematichka_install_id";
@@ -5289,6 +5289,21 @@
     }).join("\n");
   }
 
+  function canonicalV53001PowerMeasureUnit(value) {
+    const normalized = String(value || "").toLowerCase().replace(/ё/g, "е").trim();
+    if (!normalized) return "";
+    let compact = normalized
+      .replace(/^(?:кв|куб)\s*\.?\s*/i, (prefix) => /^кв/i.test(prefix) ? "__square__" : "__cube__")
+      .replace(/[()\[\]{}.,;:!?]/g, "")
+      .replace(/\s+/g, "");
+    compact = compact
+      .replace(/^__square__(мм|см|дм|м|км)$/i, "$1²")
+      .replace(/^__cube__(мм|см|дм|м|км)$/i, "$1³")
+      .replace(/^(мм|см|дм|м|км)\^?2$/i, "$1²")
+      .replace(/^(мм|см|дм|м|км)\^?3$/i, "$1³");
+    return /^(?:мм|см|дм|м|км)[²³]$/i.test(compact) ? compact : "";
+  }
+
   const V40208_ALLOWED_PAREN_UNIT_COMPACTS = new Set([
     "шт", "тысшт", "чел", "уд", "руб", "коп", "долл", "доллар", "доллара", "долларов", "кг", "г", "км", "м", "дм", "см", "мм", "л", "т", "ц", "мин", "ч", "сут", "д", "дн", "нед", "мес", "год", "года", "лет", "раз", "раза", "разов", "тыслет", "км/ч", "м/с", "т", "см2", "см²", "м2", "м²"
   ]);
@@ -5303,7 +5318,7 @@
   function isV40208AllowedParenUnit(value) {
     const normalized = normalizeV40208ShortText(value);
     if (!normalized) return true;
-    if (canonicalV52904RateUnit(normalized)) return true;
+    if (canonicalV52904RateUnit(normalized) || canonicalV53001PowerMeasureUnit(normalized)) return true;
     if (V40208_ALLOWED_PAREN_UNIT_COMPACTS.has(compactV40208ParenUnit(normalized))) return true;
     if (V40208_FULL_MEASURE_PAREN_UNITS.test(normalized)) return true;
     return false;
@@ -5390,7 +5405,7 @@
 
   function v40208IsCommonMeasurementParenUnit(unitText) {
     const unit = String(unitText || "").toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ").replace(/\.$/, "").trim();
-    if (canonicalV52904RateUnit(unit)) return true;
+    if (canonicalV52904RateUnit(unit) || canonicalV53001PowerMeasureUnit(unit)) return true;
     return /^(?:шт|чел|уд|руб|коп|долл|доллар|доллара|долларов|кг|г|км|м|дм|см|мм|л|т|ц|мин|ч|сут|д|дн|мес|лет|тыс\. лет|тыс\. шт|нед\.?|раза?|разов)$/i.test(unit);
   }
 
@@ -9351,13 +9366,14 @@
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const normBase = (value) => String(value || "").trim().replace(/\/+$/g, "");
       const backendBase = normBase(params.get("backendBaseUrl") || params.get("backend") || REMOTE_EXPLAIN_PROXY_URL.replace(/\/api\/explain.*$/i, ""));
-      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v529_04_v50103_excel_2001_2100");
-      const auditKey = String(params.get("auditKey") || params.get("key") || "v529-04-live-audit");
+      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v530_01_v50103_excel_2101_2200");
+      const auditKey = String(params.get("auditKey") || params.get("key") || "v530-01-live-audit");
       const auditSection = String(params.get("section") || params.get("auditSection") || "excel_numeric_regression");
-      const auditOffset = String(params.get("offset") || "1200");
+      const auditOffset = String(params.get("offset") || "2100");
       const auditLimit = String(params.get("limit") || "100");
       const auditAllowExternal = String(params.get("allowExternal") || "1");
       const auditMaxExternalCalls = String(params.get("maxExternalCalls") || "150");
+      const auditAutoStart = /^(?:1|true|yes|on)$/i.test(String(params.get("autoStart") || ""));
       const releaseLabelMatch = String(release || "").match(/^v(\d+)(?:[_\.](\d+))?/i);
       const releaseLabel = releaseLabelMatch ? (`V${releaseLabelMatch[1]}${releaseLabelMatch[2] ? "." + releaseLabelMatch[2] : ""}`) : "AUDIT";
       const operatorTitle = `${releaseLabel} — Excel numeric regression UI-render audit`;
@@ -9791,6 +9807,12 @@
       el("auditLastCaseBtn")?.addEventListener("click", () => { auditReviewIndex = Math.max(auditReviewRows.length - 1, 0); renderAuditReview(); });
       renderAuditReview();
       el("auditStartBtn")?.addEventListener("click", runAudit);
+      if (auditAutoStart) {
+        setTimeout(() => {
+          const button = el("auditStartBtn");
+          if (button && !button.disabled) runAudit();
+        }, 900);
+      }
       function auditFullJsonDownloadUrl() {
         const url = String(el("auditFinalUrl")?.value || "").split("#")[0];
         if (!url) return "";
@@ -9811,7 +9833,7 @@
         try { window.open(url, "_blank", "noopener,noreferrer"); setStatus("Открыл скачивание full JSON. Обычно достаточно ссылки с #json; файл нужен только для глубокой проверки.", "ok"); }
         catch { setStatus("Откройте итоговую ссылку и нажмите Download full JSON", "run"); }
       });
-      log("ready", { backendBase, release, auditKey, auditSection, auditOffset, auditLimit, frontendBuild: window.__MATH_APP_BUILD__ || "" });
+      log("ready", { backendBase, release, auditKey, auditSection, auditOffset, auditLimit, auditAutoStart, frontendBuild: window.__MATH_APP_BUILD__ || "" });
       setTimeout(() => {
         router.go("solve");
         stateApi.setRoute("solve");

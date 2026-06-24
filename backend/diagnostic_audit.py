@@ -6,7 +6,7 @@ from fractions import Fraction
 from typing import Any
 import re
 
-from backend.service import APP_RELEASE, SOLVER_VERSION, generate_explanation_response, _v4013_known_name_map, _v4013_is_stone_distribution_task, _v4017_abbreviate_si_in_answer, _v4017_lowercase_common_u_nouns, _v4017_fix_extra_name_before_group_subject, _v4018_fix_measure_answer_order, _v40204_concise_dash_explanation, _v40204_concise_counted_dash_explanation, _v52904_rate_unit_abbrev, _v52904_speed_division_semantic_issues
+from backend.service import APP_RELEASE, SOLVER_VERSION, generate_explanation_response, _v4013_known_name_map, _v4013_is_stone_distribution_task, _v4017_abbreviate_si_in_answer, _v4017_lowercase_common_u_nouns, _v4017_fix_extra_name_before_group_subject, _v4018_fix_measure_answer_order, _v40204_concise_dash_explanation, _v40204_concise_counted_dash_explanation, _v52904_rate_unit_abbrev, _v52904_speed_division_semantic_issues, _v53001_power_measure_unit_abbrev
 
 FORBIDDEN_RESULT_MARKERS = (
     'Применяем правило:',
@@ -309,7 +309,7 @@ def _excel_visible_step_unit_explanation_issues(case: dict[str, Any], result: st
             break
         unit_match = re.search(r'=\s*-?\d+(?:[,.]\d+)?\s*\(([^)]+)\)\s*[—–-]', line)
         unit_text = str(unit_match.group(1) if unit_match else '').lower().replace('ё', 'е')
-        measurement_unit_ok = bool(re.search(r'^(?:кг|г|т|л|м|см|дм|мм|км|руб\.?|коп\.?|евро|мин\.?|ч\.?|час(?:а|ов)?|д\.?|дн\.?|нед\.?|мес\.?|сек\.?|с|раза?|м/с|км/ч|м/мин|м/ч|см/ч|км/д\.?|км/день|ц)$', unit_text.strip())) or bool(_v52904_rate_unit_abbrev(unit_text))
+        measurement_unit_ok = bool(re.search(r'^(?:кг|г|т|л|м|см|дм|мм|км|руб\.?|коп\.?|евро|мин\.?|ч\.?|час(?:а|ов)?|д\.?|дн\.?|нед\.?|мес\.?|сек\.?|с|раза?|м/с|км/ч|м/мин|м/ч|см/ч|км/д\.?|км/день|ц)$', unit_text.strip())) or bool(_v52904_rate_unit_abbrev(unit_text)) or bool(_v53001_power_measure_unit_abbrev(unit_text))
         intermediate_person_unit_ok = bool(re.search(r'чел|человек', unit_text))
         if count_unit_kind == 'piece' and 'шт' not in unit_text and not measurement_unit_ok and not intermediate_person_unit_ok:
             issues.append('Excel numeric regression: counted objects must use (шт.) or (тыс. шт.) in visible calculation parentheses')
@@ -319,10 +319,18 @@ def _excel_visible_step_unit_explanation_issues(case: dict[str, Any], result: st
             break
         has_sut = bool(re.search(r'\bсут(?:ки|ок|\.)?\b', raw_answer) or re.search(r'скольк(?:о|их)\s+сут', task))
         has_day_period = bool(re.search(r'\b(?:день|дня|дней)\b', raw_answer) or re.search(r'скольк(?:о|их)\s+дн(?:ей|я)?', task))
-        if has_sut and ('шт' in unit_text or re.search(r'\bсут', unit_text)) and 'сут' not in unit_text:
+        line_result_match = re.search(r'=\s*(-?\d+(?:[,.]\d+)?)', line)
+        line_result_number = str(line_result_match.group(1) if line_result_match else '').replace(',', '.')
+        line_expl_match = re.search(r'\)\s*[—–-]\s*(.+)$', line)
+        line_expl_for_period = str(line_expl_match.group(1) if line_expl_match else '').strip().lower().replace('ё', 'е')
+        sut_answer_numbers = {str(value).replace(',', '.') for value in re.findall(r'(-?\d+(?:[,.]\d+)?)\s*сут(?:ки|ок|\.)?', raw_answer)}
+        day_answer_numbers = {str(value).replace(',', '.') for value in re.findall(r'(-?\d+(?:[,.]\d+)?)\s*(?:день|дня|дней|д\.)', raw_answer)}
+        wrong_piece_is_sut = 'шт' in unit_text and (line_result_number in sut_answer_numbers or bool(re.search(r'\bсут(?:ки|ок)?\b', line_expl_for_period)))
+        wrong_piece_is_day = 'шт' in unit_text and (line_result_number in day_answer_numbers or bool(re.search(r'\b(?:дня|дней|длительност|время)\b', line_expl_for_period)))
+        if has_sut and (wrong_piece_is_sut or re.search(r'\bсут', unit_text)) and 'сут' not in unit_text:
             issues.append('Excel numeric regression: time periods in days-as-sutki must use (сут.) in visible calculation parentheses')
             break
-        if has_day_period and not has_sut and ('шт' in unit_text or re.search(r'\b(?:д\.?|дн\.?|день|дня|дней)\b', unit_text)) and not re.search(r'\b(?:д\.?|дн\.?)\b', unit_text):
+        if has_day_period and not has_sut and (wrong_piece_is_day or re.search(r'\b(?:д\.?|дн\.?|день|дня|дней)\b', unit_text)) and not re.search(r'\b(?:д\.?|дн\.?)\b', unit_text):
             issues.append('Excel numeric regression: day periods must use (д.) in visible calculation parentheses')
             break
         expl_match = re.search(r'\)\s*[—–-]\s*(.+)$', line)
