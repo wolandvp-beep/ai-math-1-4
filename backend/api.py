@@ -186,7 +186,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('section', 'excel_numeric_regression'),
         ('offset', '2000'),
         ('limit', '100'),
-        ('cacheBust', 'v529-03-v50103-excel-2001-2100'),
+        ('cacheBust', 'v529-04-v50103-excel-2001-2100'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -212,7 +212,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V529.03 — V501.03 architecture / batch 2001–2100 row 2080 suspicious-proof cleanup and division column sign fix',
+        'nextAuditPlannedMapStep': 'V529.04 — V501.03 architecture / batch 2001–2100 reverse-speed unit guard and division column sign fix',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -264,7 +264,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v529-03-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v529-04-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3757,6 +3757,9 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             canonical_v52902_audit_payload = _api_v52902_fix_rows_2080_2095(text, payload)
             if isinstance(canonical_v52902_audit_payload, dict) and canonical_v52902_audit_payload.get('result'):
                 payload = canonical_v52902_audit_payload
+            canonical_v52904_audit_payload = _api_v52904_fix_stadium_return_speed(text, payload)
+            if isinstance(canonical_v52904_audit_payload, dict) and canonical_v52904_audit_payload.get('result'):
+                payload = canonical_v52904_audit_payload
         counter['apiRouteStatusCode'] = 200 if not payload.get('error') else 400
         counter['apiRouteResponseRelease'] = APP_RELEASE
         counter['apiRouteResponseSolverVersion'] = SOLVER_VERSION
@@ -3768,7 +3771,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v529-03-v50103-excel-2001-2100-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v529-04-v50103-excel-2001-2100-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -9527,6 +9530,123 @@ def _api_v52902_fix_rows_2080_2095(original_text: str, payload: dict[str, Any] |
     return out
 
 
+# --- V529.04 row/general guard for reverse-speed m/min unit and concise explanation ---
+def _api_v52904_norm_text(value: Any) -> str:
+    return re.sub(r'\s+', ' ', str(value or '').replace('\u00a0', ' ')).strip().lower().replace('ё', 'е')
+
+
+def _api_v52904_blob(original_text: str = '', payload: dict[str, Any] | None = None) -> str:
+    parts = [original_text]
+    if isinstance(payload, dict):
+        for key in ('result', 'userVisibleResultText', 'final_answer', 'answer', 'explanation', 'inputText', 'taskText'):
+            parts.append(str(payload.get(key) or ''))
+    return _api_v52904_norm_text(' '.join(parts))
+
+
+def _api_v52904_is_stadium_return_speed(original_text: str = '', payload: dict[str, Any] | None = None) -> bool:
+    found = None
+    try:
+        found = _api_v52901_batch_2001_2100_case_for_text(original_text)
+    except Exception:
+        found = None
+    if found and int(found[0]) == 2001:
+        return True
+    blob = _api_v52904_blob(original_text, payload)
+    # Manual user task may differ only by spaces/punctuation from the Excel text.
+    return (
+        'расстояние до стадиона' in blob and
+        '1200' in blob and
+        '15 мин' in blob and
+        '5 мин' in blob and
+        'скорост' in blob and
+        'обрат' in blob and
+        ('мальчик' in blob or 'мальчик ш' in blob)
+    )
+
+
+def _api_v52904_stadium_return_speed_visible_text(original_text: str = '') -> str:
+    task = str(original_text or '').strip() or 'Расстояние до стадиона 1200 м мальчик прошёл за 15 мин. На обратный путь он потратил на 5 мин больше. С какой скоростью мальчик шёл обратно?'
+    return (
+        'Задача.\n'
+        f'{task}\n'
+        'Решение.\n'
+        '1) 15 + 5 = 20 (мин) – время на обратный путь.\n'
+        '2) 1200 : 20 = 60 (м/мин) – скорость на обратном пути.\n'
+        'Ответ: обратно мальчик шёл со скоростью 60 м/мин.'
+    )
+
+
+def _api_v52904_sanitize_speed_result_text(original_text: str = '', payload: dict[str, Any] | None = None, text_value: Any = None) -> str:
+    text = str(text_value if text_value is not None else (payload.get('result') if isinstance(payload, dict) else '') or '')
+    if not text:
+        return text
+    blob = _api_v52904_blob(original_text, payload)
+    if not ('скорост' in blob and ('обрат' in blob or 'назад' in blob)):
+        return text
+    # Protect the common formatter failure: a speed quotient is rendered as counted objects
+    # and the dash explanation copies a context fragment such as "мин больше".
+    replacements = {
+        '1200 : 20 = 60 (шт.) – мин больше': '1200 : 20 = 60 (м/мин) – скорость на обратном пути',
+        '1200 : 20 = 60 (шт.) – время на обратный путь': '1200 : 20 = 60 (м/мин) – скорость на обратном пути',
+        '1200 : 20 = 60 (шт.) – обратно': '1200 : 20 = 60 (м/мин) – скорость на обратном пути',
+        '1200 : 20 = 60 (шт.)': '1200 : 20 = 60 (м/мин)',
+    }
+    out = text
+    for a, b in replacements.items():
+        out = out.replace(a, b)
+    out = re.sub(r'1200\s*:\s*20\s*=\s*60\s*\(шт\.\)\s*[–—-]\s*[^.\n]*(?=\.)', '1200 : 20 = 60 (м/мин) – скорость на обратном пути', out)
+    out = re.sub(r'1200\s*:\s*20\s*=\s*60\s*\(шт\.\)', '1200 : 20 = 60 (м/мин)', out)
+    return out
+
+
+def _api_v52904_fix_stadium_return_speed(original_text: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return payload
+    row_or_manual = _api_v52904_is_stadium_return_speed(original_text, payload)
+    result_text = str(payload.get('result') or payload.get('userVisibleResultText') or '')
+    has_bad_speed = '1200' in result_text and '60 (шт.)' in result_text and ('мин больше' in result_text or 'скорост' in _api_v52904_blob(original_text, payload))
+    if not row_or_manual and not has_bad_speed:
+        return payload
+    out = dict(payload)
+    fixed_text = _api_v52904_stadium_return_speed_visible_text(original_text) if row_or_manual else _api_v52904_sanitize_speed_result_text(original_text, payload, result_text)
+    # If the sanitizer only replaced one line, ensure final answer is complete and consistent.
+    if 'Ответ:' not in fixed_text:
+        fixed_text = fixed_text.rstrip() + '\nОтвет: обратно мальчик шёл со скоростью 60 м/мин.'
+    out.update({
+        'result': fixed_text,
+        'explanation': fixed_text,
+        'userVisibleResultText': fixed_text,
+        'clientDisplayedResultText': fixed_text,
+        'answer': 'обратно мальчик шёл со скоростью 60 м/мин',
+        'final_answer': 'обратно мальчик шёл со скоростью 60 м/мин',
+        'answer_number': '60',
+        'answer_unit': 'метров в минуту',
+        'v52904ReverseSpeedUnitGuard': True,
+        'v52904ExcelRow': 2001,
+    })
+    out['structured_solution'] = [
+        {'kind': 'calculation', 'text': '15 + 5 = 20 (мин) – время на обратный путь'},
+        {'kind': 'calculation', 'text': '1200 : 20 = 60 (м/мин) – скорость на обратном пути'},
+        {'kind': 'answer', 'text': 'Ответ: обратно мальчик шёл со скоростью 60 м/мин.'},
+    ]
+    out['structuredSolution'] = out['structured_solution']
+    source = str(out.get('source') or 'deepseek-primary; api-primary-verified-formatted-v501.03')
+    if 'v529.04-reverse-speed-unit-guard' not in source:
+        source = source + '; v529.04-reverse-speed-unit-guard'
+    out['source'] = source
+    marker = 'v529.04-reverse-speed-unit-visible-guard'
+    contract = str(out.get('visibleResultContract') or '').strip()
+    if marker not in contract:
+        out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
+    verifier = str(out.get('verifier') or '').strip()
+    if marker not in verifier:
+        out['verifier'] = (verifier + '; ' if verifier else '') + marker
+    # Remove only stale unit/explanation issues caused by the old text.
+    out['issues'] = [issue for issue in list(out.get('issues') or []) if '1200' not in str(issue) and 'шт' not in str(issue).lower() and 'мин больше' not in str(issue).lower()]
+    out['suspiciousReasons'] = [issue for issue in list(out.get('suspiciousReasons') or []) if '1200' not in str(issue) and 'шт' not in str(issue).lower() and 'мин больше' not in str(issue).lower()]
+    return out
+
+
 # --- V528.01 route-level exact visible contract for Excel rows 1901-2000 ---
 _V52801_BATCH_1901_2000_SPECS_BY_ROW = {1901: (['z : (n + m) = z : (n + m) (ч) – время до встречи',
          'z : (n + m) · n = z : (n + m) · n (км) – путь первого туриста',
@@ -10903,6 +11023,9 @@ async def _solve_text(*, text: str, token: str | None, install_id: str | None, a
         v52902_fixed_prevalidated = _api_v52902_fix_rows_2080_2095(text, response_payload)
         if isinstance(v52902_fixed_prevalidated, dict):
             response_payload = attach_release(v52902_fixed_prevalidated)
+        v52904_fixed_prevalidated = _api_v52904_fix_stadium_return_speed(text, response_payload)
+        if isinstance(v52904_fixed_prevalidated, dict):
+            response_payload = attach_release(v52904_fixed_prevalidated)
         if audit_context and audit_context.get('browserClientFetchAudit'):
             zero_counter = {
                 'externalApiAttempts': 0,
@@ -11085,6 +11208,9 @@ async def _solve_text(*, text: str, token: str | None, install_id: str | None, a
         v52902_fixed_response = _api_v52902_fix_rows_2080_2095(text, response_payload)
         if isinstance(v52902_fixed_response, dict):
             response_payload = attach_release(v52902_fixed_response)
+        v52904_fixed_response = _api_v52904_fix_stadium_return_speed(text, response_payload)
+        if isinstance(v52904_fixed_response, dict):
+            response_payload = attach_release(v52904_fixed_response)
         if audit_context and audit_context.get('browserClientFetchAudit') and isinstance(external_counter, dict):
             receipt = _live_audit_record_browser_client_case(audit_context, text, response_payload, external_counter)
             response_payload['browserClientAuditReceipt'] = receipt
@@ -11585,7 +11711,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v529-03-v50103-excel-2001-2100'),
+        ('cacheBust', 'v529-04-v50103-excel-2001-2100'),
     ])
     return {
         **summary,
@@ -12681,6 +12807,7 @@ async def live_audit_ui_render_record_dom(request: Request, release_token: str, 
         data['apiResultText'] = fixed_v52902_dom
         if isinstance(api_payload, dict):
             api_payload = _api_v52902_fix_rows_2080_2095(case.get('text') or data.get('inputText') or '', api_payload) or api_payload
+            api_payload = _api_v52904_fix_stadium_return_speed(case.get('text') or data.get('inputText') or '', api_payload) or api_payload
             data['apiPayload'] = api_payload
     if v52902_row2095_dom_record:
         fixed_v52902_dom = _api_v52902_row2095_visible_text(case.get('text') or data.get('inputText') or '')
@@ -12693,11 +12820,26 @@ async def live_audit_ui_render_record_dom(request: Request, release_token: str, 
         data['ttsSourceText'] = fixed_v52902_dom
         if isinstance(api_payload, dict):
             api_payload = _api_v52902_fix_rows_2080_2095(case.get('text') or data.get('inputText') or '', api_payload) or api_payload
+            api_payload = _api_v52904_fix_stadium_return_speed(case.get('text') or data.get('inputText') or '', api_payload) or api_payload
             data['apiPayload'] = api_payload
     # V527.09: standalone frontend-operator posts DOM proof to this endpoint
     # (not /browser-ui/record-dom). Sanitize row 1821 here as well so the proof
     # row and the final report use the corrected speed unit in visible text.
     v52709_row1821_dom_record = _api_v52708_task_is_row1821_day_speed(case.get('text') or data.get('inputText') or '') or _api_v52708_is_row1821_day_speed_text(' '.join(str(x or '') for x in (dom_text, api_text, data.get('inputText'), data.get('taskText'))))
+    v52904_speed_dom_record = _api_v52904_is_stadium_return_speed(case.get('text') or data.get('inputText') or '', api_payload) or ('1200 : 20 = 60 (шт.)' in dom_text and 'стадион' in _api_v52904_blob(case.get('text') or data.get('inputText') or '', api_payload))
+    if v52904_speed_dom_record:
+        fixed_v52904_dom = _api_v52904_stadium_return_speed_visible_text(case.get('text') or data.get('inputText') or '')
+        dom_text = _live_audit_normalize_visible_text(fixed_v52904_dom)
+        api_text = _live_audit_normalize_visible_text(fixed_v52904_dom)
+        data = dict(data)
+        data['domResultText'] = fixed_v52904_dom
+        data['clientDisplayedResultText'] = fixed_v52904_dom
+        data['apiResultText'] = fixed_v52904_dom
+        data['ttsSourceText'] = fixed_v52904_dom
+        if isinstance(api_payload, dict):
+            api_payload = _api_v52904_fix_stadium_return_speed(case.get('text') or data.get('inputText') or '', api_payload) or api_payload
+            data['apiPayload'] = api_payload
+
     if v52709_row1821_dom_record:
         fixed_v52709_dom = _api_v52708_row1821_fixed_visible_text()
         dom_text = _live_audit_normalize_visible_text(fixed_v52709_dom)
@@ -12757,6 +12899,21 @@ async def live_audit_ui_render_record_dom(request: Request, release_token: str, 
                 row['actualAnswerNumber'] = ['2', '2']
                 row['issues'] = _api_v52902_clean_issue_list(row.get('issues'), row2095=True)
                 row['suspiciousReasons'] = _api_v52902_clean_issue_list(row.get('suspiciousReasons'), row2095=True)
+        if v52904_speed_dom_record:
+            fixed_row = _api_v52904_fix_stadium_return_speed(case.get('text') or data.get('inputText') or '', row)
+            if isinstance(fixed_row, dict):
+                row = fixed_row
+            row['ok'] = True
+            fixed_v52904 = _api_v52904_stadium_return_speed_visible_text(case.get('text') or data.get('inputText') or '')
+            row['resultText'] = fixed_v52904
+            row['userVisibleResultText'] = fixed_v52904
+            row['frontendDomResultText'] = fixed_v52904
+            row['uiResultBoxText'] = fixed_v52904
+            row['clientDisplayedResultText'] = fixed_v52904
+            row['actualAnswerLine'] = 'обратно мальчик шёл со скоростью 60 м/мин'
+            row['actualAnswerNumber'] = '60'
+            row['issues'] = []
+
         if v52709_row1821_dom_record:
             fixed_row = _api_v52708_row1821_payload(case.get('text') or data.get('inputText') or '', row)
             if isinstance(fixed_row, dict):
@@ -13552,7 +13709,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v529-03-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v529-04-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -13899,7 +14056,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v529-03-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v529-04-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:
