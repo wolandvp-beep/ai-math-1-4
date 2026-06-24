@@ -309,7 +309,7 @@ def _excel_visible_step_unit_explanation_issues(case: dict[str, Any], result: st
             break
         unit_match = re.search(r'=\s*-?\d+(?:[,.]\d+)?\s*\(([^)]+)\)\s*[—–-]', line)
         unit_text = str(unit_match.group(1) if unit_match else '').lower().replace('ё', 'е')
-        measurement_unit_ok = bool(re.search(r'^(?:кг|г|т|л|м|см|дм|мм|км|руб\.?|коп\.?|мин\.?|ч\.?|час(?:а|ов)?|д\.?|дн\.?|нед\.?|мес\.?|сек\.?|с|раза?|м/с|км/ч|м/мин|м/ч|см/ч|км/д\.?|км/день|ц)$', unit_text.strip()))
+        measurement_unit_ok = bool(re.search(r'^(?:кг|г|т|л|м|см|дм|мм|км|руб\.?|коп\.?|евро|мин\.?|ч\.?|час(?:а|ов)?|д\.?|дн\.?|нед\.?|мес\.?|сек\.?|с|раза?|м/с|км/ч|м/мин|м/ч|см/ч|км/д\.?|км/день|ц)$', unit_text.strip()))
         intermediate_person_unit_ok = bool(re.search(r'чел|человек', unit_text))
         if count_unit_kind == 'piece' and 'шт' not in unit_text and not measurement_unit_ok and not intermediate_person_unit_ok:
             issues.append('Excel numeric regression: counted objects must use (шт.) or (тыс. шт.) in visible calculation parentheses')
