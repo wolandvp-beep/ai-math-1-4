@@ -6650,3 +6650,16 @@ body.keyboard-open .bottom-control-strip--solve .bottom-control-group--right{
 #resultBox .column-note[style*="--note-accent"]::before{
   opacity:.98 !important;
 }
+
+
+/* v529.02: in long division, the minus sign is visually between the upper partial dividend and the lower product. */
+.division-table .division-minus-between,
+#resultBox .division-table .division-minus-between{
+  vertical-align:middle !important;
+  text-align:center !important;
+  line-height:1 !important;
+  font-weight:800 !important;
+}
+#resultBox .division-table .division-minus-between{
+  color:#ffffff !important;
+}
