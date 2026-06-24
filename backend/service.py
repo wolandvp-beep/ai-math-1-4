@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v530_01_v50103_excel_2101_2200'
-SOLVER_VERSION = 'v530-01-v50103-excel-2101-2200'
+APP_RELEASE = 'v530_02_v50103_excel_2101_2200'
+SOLVER_VERSION = 'v530-02-v50103-excel-2101-2200'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -42,9 +42,14 @@ def _format_power_units_text(text: str) -> str:
     # Old textbook abbreviations: кв. см / кв см / куб. дм / куб м.
     value = re.sub(r'(?i)\b(кв|куб)\s*\.?\s*(мм|см|дм|м|км)\b', repl_word, value)
 
-    # Plain digit forms from legacy maps: см2, м^2, дм 3, км³.
-    value = re.sub(r'(?i)\b(мм|см|дм|м|км)\s*\^?\s*2\b', lambda m: f'{m.group(1).lower()}²', value)
-    value = re.sub(r'(?i)\b(мм|см|дм|м|км)\s*\^?\s*3\b', lambda m: f'{m.group(1).lower()}³', value)
+    # Legacy power forms are either adjacent (см2) or explicitly use a
+    # caret (м^2 / м ^ 2).  A whitespace-separated digit is a new
+    # measurement component, so "7 м 2 дм" must remain linear units.
+    unit = r'(мм|см|дм|м|км)'
+    value = re.sub(rf'(?i)(?<![а-яёa-z]){unit}\s*\^\s*2(?!\d)', lambda m: f'{m.group(1).lower()}²', value)
+    value = re.sub(rf'(?i)(?<![а-яёa-z]){unit}2(?!\d)', lambda m: f'{m.group(1).lower()}²', value)
+    value = re.sub(rf'(?i)(?<![а-яёa-z]){unit}\s*\^\s*3(?!\d)', lambda m: f'{m.group(1).lower()}³', value)
+    value = re.sub(rf'(?i)(?<![а-яёa-z]){unit}3(?!\d)', lambda m: f'{m.group(1).lower()}³', value)
     return value
 
 

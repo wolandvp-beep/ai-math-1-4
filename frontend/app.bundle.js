@@ -1,5 +1,5 @@
 (() => {
-  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v530_01_v50103_excel_2101_2200";
+  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v530_02_v50103_excel_2101_2200";
   // src/i18n/ru.js
   var ru = {
     "app.name": "\u041C\u0430\u0442\u0435\u043C\u0430\u0442\u0438\u0447\u043A\u0430",
@@ -296,9 +296,31 @@
   function formatPowerUnitsForDisplay(text) {
     let value = String(text || "");
     if (!value) return value;
-    value = value.replace(/\b(кв|куб)\s*\.?\s*(мм|см|дм|м|км)\b/gi, (_, prefix, unit) => `${String(unit).toLowerCase()}${String(prefix).toLowerCase().startsWith("кв") ? "²" : "³"}`);
-    value = value.replace(/\b(мм|см|дм|м|км)\s*\^?\s*2\b/gi, (_, unit) => `${String(unit).toLowerCase()}²`);
-    value = value.replace(/\b(мм|см|дм|м|км)\s*\^?\s*3\b/gi, (_, unit) => `${String(unit).toLowerCase()}³`);
+    const unitLead = "(^|[^А-Яа-яЁёA-Za-z])";
+    const unitBody = "(мм|см|дм|м|км)";
+    value = value.replace(new RegExp(`${unitLead}(кв|куб)\\s*\\.?\\s*${unitBody}(?![А-Яа-яЁёA-Za-z])`, "gi"), (_, lead, prefix, unit) => `${lead}${String(unit).toLowerCase()}${String(prefix).toLowerCase().startsWith("кв") ? "²" : "³"}`);
+    value = value.replace(new RegExp(`${unitLead}${unitBody}\\s*\\^\\s*2(?!\\d)`, "gi"), (_, lead, unit) => `${lead}${String(unit).toLowerCase()}²`);
+    value = value.replace(new RegExp(`${unitLead}${unitBody}2(?!\\d)`, "gi"), (_, lead, unit) => `${lead}${String(unit).toLowerCase()}²`);
+    value = value.replace(new RegExp(`${unitLead}${unitBody}\\s*\\^\\s*3(?!\\d)`, "gi"), (_, lead, unit) => `${lead}${String(unit).toLowerCase()}³`);
+    value = value.replace(new RegExp(`${unitLead}${unitBody}3(?!\\d)`, "gi"), (_, lead, unit) => `${lead}${String(unit).toLowerCase()}³`);
+    return value;
+  }
+
+  function semanticRenderedText(element) {
+    if (!element || typeof document === "undefined") return "";
+    const clone = element.cloneNode(true);
+    clone.removeAttribute?.("id");
+    clone.querySelectorAll?.("[id]").forEach((node) => node.removeAttribute("id"));
+    clone.querySelectorAll?.(".school-fraction").forEach((node) => {
+      const plain = String(node.getAttribute("data-plain-text") || node.getAttribute("aria-label") || "").trim();
+      if (plain) node.replaceWith(document.createTextNode(plain));
+    });
+    const width = Math.max(320, Math.round(element.getBoundingClientRect?.().width || 0));
+    clone.setAttribute?.("aria-hidden", "true");
+    clone.style.cssText += `;position:fixed!important;left:-100000px!important;top:0!important;width:${width}px!important;opacity:0!important;pointer-events:none!important;z-index:-1!important;`;
+    document.body.appendChild(clone);
+    const value = String(clone.innerText || clone.textContent || "").replace(/\r/g, "").trim();
+    clone.remove();
     return value;
   }
 
@@ -1073,7 +1095,7 @@
     DEFAULT_LANGUAGE: "ru",
     ENABLE_DEMO_FALLBACK: true
   };
-  var EXPECTED_BACKEND_RELEASE = "v530_01_v50103_excel_2101_2200";
+  var EXPECTED_BACKEND_RELEASE = "v530_02_v50103_excel_2101_2200";
 
   // src/storage/installIdStorage.js
   var KEY5 = "matematichka_install_id";
@@ -4574,7 +4596,7 @@
     const strikeBottom = Boolean(options?.strikeBottom);
     const classes = ["school-fraction", topMark ? "school-fraction--annotated" : "", bottomMark ? "school-fraction--bottom-annotated" : ""].filter(Boolean).join(" ");
     return `
-    <span class="${classes}" aria-label="${escapeHtml(`${numerator}/${denominator}`)}">
+    <span class="${classes}" aria-label="${escapeHtml(`${numerator}/${denominator}`)}" data-plain-text="${escapeHtml(`${numerator}/${denominator}`)}">
       ${topMark ? `
         <span class="school-fraction__mark-wrap" aria-hidden="true">
           <span class="school-fraction__mark-connector"></span>
@@ -9215,7 +9237,7 @@
         // getVisibleResultText()/state first, so backend-full answers could look
         // correct in proof while the real result card formatter shortened them.
         const box = document.getElementById("resultBox");
-        const dom = String(box?.innerText || box?.textContent || "").replace(/\r/g, "").trim();
+        const dom = semanticRenderedText(box);
         const v52709TaskText = String(document.getElementById("taskInput")?.value || stateApi.get().draft || "");
         if (dom) {
           const fixedDom = forceV52707Row1821DaySpeedText(dom, v52709TaskText);
@@ -9366,8 +9388,8 @@
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const normBase = (value) => String(value || "").trim().replace(/\/+$/g, "");
       const backendBase = normBase(params.get("backendBaseUrl") || params.get("backend") || REMOTE_EXPLAIN_PROXY_URL.replace(/\/api\/explain.*$/i, ""));
-      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v530_01_v50103_excel_2101_2200");
-      const auditKey = String(params.get("auditKey") || params.get("key") || "v530-01-live-audit");
+      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v530_02_v50103_excel_2101_2200");
+      const auditKey = String(params.get("auditKey") || params.get("key") || "v530-02-live-audit");
       const auditSection = String(params.get("section") || params.get("auditSection") || "excel_numeric_regression");
       const auditOffset = String(params.get("offset") || "2100");
       const auditLimit = String(params.get("limit") || "100");
@@ -9596,7 +9618,7 @@
         // getVisibleResultText()/state first, so backend-full answers could look
         // correct in proof while the real result card formatter shortened them.
         const box = document.getElementById("resultBox");
-        const dom = String(box?.innerText || box?.textContent || "").replace(/\r/g, "").trim();
+        const dom = semanticRenderedText(box);
         const v52709TaskText = String(document.getElementById("taskInput")?.value || stateApi.get().draft || "");
         if (dom) {
           const fixedDom = forceV52707Row1821DaySpeedText(dom, v52709TaskText);

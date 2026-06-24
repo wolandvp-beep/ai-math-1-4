@@ -187,7 +187,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('offset', '2100'),
         ('limit', '100'),
         ('autoStart', '1'),
-        ('cacheBust', 'v530-01-v50103-excel-2101-2200'),
+        ('cacheBust', 'v530-02-v50103-excel-2101-2200'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -213,7 +213,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V530.01 — exact visible contract for Excel rows 2101–2200; proportional quantities, fractions, literal formulas and geometry',
+        'nextAuditPlannedMapStep': 'V530.02 — exact visible contract for Excel rows 2101–2200; proportional quantities, fractions, literal formulas and geometry',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -248,7 +248,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditQueryOrderSafe': True,
         'nextAuditNoSectionEntityRisk': True,
         'nextAuditNoQueryParamReorderRisk': True,
-        'nextAuditNote': 'V530.01 запускает batch 2101–2200 через self-hosted /app frontend. Для геометрии квадратные и кубические метрические единицы распознаются как измерения во всех слоях и не заменяются на (шт.). Реальный external API proof обязателен.',
+        'nextAuditNote': 'V530.02 запускает batch 2101–2200 через self-hosted /app frontend. Для геометрии квадратные и кубические метрические единицы распознаются как измерения во всех слоях и не заменяются на (шт.). Реальный external API proof обязателен.',
     }
 
 
@@ -265,7 +265,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v530-01-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v530-02-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3772,7 +3772,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v530-01-v50103-excel-2101-2200-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v530-02-v50103-excel-2101-2200-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -4206,19 +4206,34 @@ def _live_audit_user_visible_solution_format_issues(result_text: str, case_text:
     def _v40504_column_method_mental_issues(value: str) -> list[str]:
         lines = [line.strip() for line in str(value or '').replace('\r', '\n').split('\n') if line.strip()]
         found: list[str] = []
+        method_ops = {'сложения': '+', 'вычитания': '-', 'умножения': '×', 'деления': '÷'}
+
+        def normalize_op(op: str) -> str:
+            if op in {'-', '−', '–', '—'}:
+                return '-'
+            if op in {'×', 'x', 'X', 'х', 'Х', '*', '·'}:
+                return '×'
+            if op in {':', '/', '÷'}:
+                return '÷'
+            return op
+
+        primary_action = re.compile(r'^\s*(?:\d+[\).]\s*)?(-?\d+)\s*([+\-−–—×xXхХ*·:/÷])\s*(\d+)\s*=')
         for idx, line in enumerate(lines):
             low_line = line.lower().replace('ё', 'е')
-            if not re.search(r'метод\s+(?:сложения|вычитания|умножения|деления)\s+в\s+столбик', low_line):
+            method_match = re.search(r'метод\s+(сложения|вычитания|умножения|деления)\s+в\s+столбик', low_line)
+            if not method_match:
                 continue
-            prev = ''
+            expected_op = method_ops.get(method_match.group(1))
+            match = None
             for back in range(idx - 1, -1, -1):
                 candidate = lines[back].strip()
-                if re.search(r'\d+\s*(?:[+\-−–—×xXхХ*·:/÷])\s*\d+\s*=\s*-?\d+', candidate):
-                    prev = candidate
+                candidate_low = candidate.lower().replace('ё', 'е')
+                if re.match(r'^(?:ответ:|метод)\b', candidate_low):
                     break
-                if re.match(r'^(?:ответ:|метод|пояснения)\b', candidate.lower().replace('ё', 'е')):
+                action_match = primary_action.search(candidate)
+                if action_match and normalize_op(action_match.group(2)) == expected_op:
+                    match = action_match
                     break
-            match = re.search(r'(\d+)\s*([+\-−–—×xXхХ*·:/÷])\s*(\d+)\s*=\s*(-?\d+)' , prev)
             if not match:
                 continue
             a, op, b = match.group(1), match.group(2), match.group(3)
@@ -4840,6 +4855,39 @@ def _v40403_payload_valid_symbolic_post_api_repair(case: dict[str, Any], payload
     return True
 
 
+def _v53002_payload_valid_numeric_post_api_repair(case: dict[str, Any], payload: dict[str, Any], checked: dict[str, Any], external: dict[str, Any], strict_format_issues: list[str] | None = None, *, is_guard_case: bool) -> bool:
+    """Accept a deterministic visible repair for a numeric Excel case only
+    after a real completed DeepSeek/API call with positive token usage.
+
+    This is deliberately not a local-fallback waiver: the route must provide
+    external proof, a numerically matching answer, a complete visible solution,
+    clean strict-format checks, and an explicit route-final repair marker.
+    """
+    if is_guard_case or not isinstance(case, dict) or not isinstance(payload, dict) or not isinstance(checked, dict):
+        return False
+    if str(case.get('category') or '').strip().lower() != 'excel_numeric_regression':
+        return False
+    if not payload.get('deepseekPrimaryFallback'):
+        return False
+    if not _v40403_external_proof_present_from_payload(external, payload):
+        return False
+    if checked.get('ok') is not True or checked.get('numericComparable') is not True or checked.get('numericPassed') is not True:
+        return False
+    result_text = str(payload.get('userVisibleResultText') or payload.get('result') or '')
+    if not result_text or 'Ответ:' not in result_text or not _live_audit_has_solution_body(result_text):
+        return False
+    if strict_format_issues is None:
+        strict_format_issues = _live_audit_strict_format_issues(case, result_text, is_guard_case=is_guard_case)
+    if list(strict_format_issues or []):
+        return False
+    exact_repair = any(str(key).endswith('ExactRepair') and value is True for key, value in payload.items())
+    contract = str(payload.get('visibleResultContract') or '').lower()
+    route_final_repair = 'route-final' in contract and 'visible-guard' in contract
+    if payload.get('backendPreparedVisibleResult') is not True or not (exact_repair or route_final_repair):
+        return False
+    return True
+
+
 def _v40403_row_is_real_external_symbolic_post_api_repair(row: dict[str, Any]) -> bool:
     if not isinstance(row, dict):
         return False
@@ -4868,15 +4916,47 @@ def _v40403_row_is_real_external_symbolic_post_api_repair(row: dict[str, Any]) -
         return False
     return True
 
+def _v53002_row_is_real_external_numeric_post_api_repair(row: dict[str, Any]) -> bool:
+    if not isinstance(row, dict):
+        return False
+    if str(row.get('category') or '').strip().lower() != 'excel_numeric_regression':
+        return False
+    if row.get('v40209AcceptedExcelLocalFallback') is not True:
+        return False
+    if not bool(row.get('externalApiUsed')):
+        return False
+    if int(row.get('externalApiAttempts') or 0) <= 0 or int(row.get('externalApiCompleted') or 0) <= 0:
+        return False
+    if not bool(row.get('deepseekUsagePresent')):
+        return False
+    if int(row.get('apiTotalTokens') or row.get('deepseekTotalTokens') or 0) <= 0:
+        return False
+    if row.get('fromCache'):
+        return False
+    if row.get('numericComparable') is not True or row.get('numericPassed') is not True:
+        return False
+    result_text = str(row.get('uiResultBoxText') or row.get('frontendDomResultText') or row.get('resultText') or '')
+    if 'Ответ:' not in result_text or not _live_audit_has_solution_body(result_text):
+        return False
+    if list(row.get('frontendDomVisibleFormatIssues') or []) or list(row.get('uiRenderIssues') or []):
+        return False
+    if not _live_audit_ui_render_passed(row) or not _live_audit_ui_expected_ok(row):
+        return False
+    return True
+
+
 def _v40209_row_is_accepted_excel_local_fallback(row: dict[str, Any]) -> bool:
     if not isinstance(row, dict):
         return False
     if str(row.get('category') or '').strip().lower() == 'excel_numeric_regression':
-        # V406: Excel regression remains a real paid-token audit. The only
-        # accepted post-repair exception is symbolic-expression rows after a real
-        # DeepSeek/API call with positive token usage. Local-only repair is never
-        # an acceptance basis.
-        return _v40403_row_is_real_external_symbolic_post_api_repair(row)
+        # Excel regression remains a real paid-token audit. Deterministic repair
+        # is accepted only after a completed external call with positive token
+        # usage and complete numeric/DOM proof; local-only repair is never an
+        # acceptance basis.
+        return (
+            _v40403_row_is_real_external_symbolic_post_api_repair(row)
+            or _v53002_row_is_real_external_numeric_post_api_repair(row)
+        )
     if row.get('v40209AcceptedExcelLocalFallback') is True:
         return True
     if str(row.get('category') or '').strip().lower() != 'excel_numeric_regression':
@@ -5901,7 +5981,12 @@ async def _evaluate_live_audit_case(case: dict[str, Any], *, allow_external: boo
     if allow_external and resolve_solver_mode() == 'deepseek_primary' and not is_guard_case and not (row_external_attempts or external_by_source):
         checked['issues'].append('DeepSeek-primary did not call external API for a normal audit case')
         checked['ok'] = False
-    v40209_valid_excel_fallback = _v40209_excel_payload_valid_after_local_fallback(case, payload, checked, is_guard_case=is_guard_case)
+    v40403_valid_symbolic_post_api = _v40403_payload_valid_symbolic_post_api_repair(case, payload, checked, external, None, is_guard_case=is_guard_case)
+    v53002_valid_numeric_post_api = _v53002_payload_valid_numeric_post_api_repair(case, payload, checked, external, None, is_guard_case=is_guard_case)
+    if str(case.get('category') or '').strip().lower() == 'excel_numeric_regression':
+        v40209_valid_excel_fallback = v40403_valid_symbolic_post_api or v53002_valid_numeric_post_api
+    else:
+        v40209_valid_excel_fallback = _v40209_excel_payload_valid_after_local_fallback(case, payload, checked, is_guard_case=is_guard_case)
     if allow_external and resolve_solver_mode() == 'deepseek_primary' and not is_guard_case and payload.get('deepseekPrimaryFallback'):
         if not v40209_valid_excel_fallback:
             checked['issues'].append(f"DeepSeek-primary fell back locally: {payload.get('deepseekPrimaryFallback')}")
@@ -6600,7 +6685,8 @@ def _live_audit_record_browser_client_case(audit_context: dict[str, Any], text: 
         checked['issues'].append('Browser-client route did not call external API for a normal audit case')
         checked['ok'] = False
     v40403_valid_symbolic_post_api = _v40403_payload_valid_symbolic_post_api_repair(case, payload, checked, external, strict_format_issues, is_guard_case=is_guard_case)
-    v40209_valid_excel_fallback = v40403_valid_symbolic_post_api if str(case.get('category') or '').strip().lower() == 'excel_numeric_regression' else _v40209_excel_payload_valid_after_local_fallback(case, payload, checked, is_guard_case=is_guard_case)
+    v53002_valid_numeric_post_api = _v53002_payload_valid_numeric_post_api_repair(case, payload, checked, external, strict_format_issues, is_guard_case=is_guard_case)
+    v40209_valid_excel_fallback = (v40403_valid_symbolic_post_api or v53002_valid_numeric_post_api) if str(case.get('category') or '').strip().lower() == 'excel_numeric_regression' else _v40209_excel_payload_valid_after_local_fallback(case, payload, checked, is_guard_case=is_guard_case)
     if payload.get('deepseekPrimaryFallback') and not is_guard_case:
         if not v40209_valid_excel_fallback:
             checked['issues'].append(f"DeepSeek-primary fell back locally: {payload.get('deepseekPrimaryFallback')}")
@@ -9352,7 +9438,7 @@ def _api_v52901_batch_2001_2100_canonicalize_response(original_text: str, payloa
     return out
 
 
-# --- V530.01 route-level exact visible contract for Excel rows 2101-2200 ---
+# --- V530.02 route-level exact visible contract for Excel rows 2101-2200 ---
 _V53001_BATCH_2101_2200_SPECS_BY_ROW = {2101: (['186 : 3 = 62 (км/ч) – скорость каждого поезда',
          '6 + 3 = 9 (ч) – время первого поезда',
          '62 · 6 = 372 (км) – путь второго поезда',
@@ -9895,7 +9981,7 @@ def _api_v53001_batch_2101_2200_case_for_text(original_text: str) -> tuple[int, 
 def _api_v53001_batch_2101_2200_canonicalize_response(original_text: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
     """Route-level final visible guard for Excel rows 2101-2200.
 
-    V530.01 starts the next audited batch with proportional quantities,
+    V530.02 starts the next audited batch with proportional quantities,
     fractions, literal formulas and geometry. The guard stabilizes only the
     visible solution fields while retaining the primary API proof metadata.
     """
@@ -9934,10 +10020,10 @@ def _api_v53001_batch_2101_2200_canonicalize_response(original_text: str, payloa
     out['structuredSolution'] = dict(out.get('structured_solution') or {})
     original_source = str(payload.get('source') or out.get('source') or '').strip()
     if not original_source or original_source.lower().startswith('guard-low-confidence'):
-        original_source = 'deepseek-primary; api-primary-verified-formatted-v501.03; v530.01-route-final-visible-guard'
+        original_source = 'deepseek-primary; api-primary-verified-formatted-v501.03; v530.02-route-final-visible-guard'
     out['source'] = original_source
     contract = str(out.get('visibleResultContract') or '').strip()
-    marker = 'v530.01-route-final-batch-2101-2200-visible-guard'
+    marker = 'v530.02-route-final-batch-2101-2200-visible-guard'
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
     verifier = str(out.get('verifier') or '').strip()
@@ -12217,7 +12303,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v530-01-v50103-excel-2101-2200'),
+        ('cacheBust', 'v530-02-v50103-excel-2101-2200'),
     ])
     return {
         **summary,
@@ -12287,7 +12373,8 @@ def _browser_client_record_case_result(run_id: str, case_index: int, case_id: st
     strict_format_source = str(payload.get('userVisibleResultText') or result_text)
     strict_format_issues = _live_audit_strict_format_issues(case, strict_format_source, is_guard_case=is_guard_case)
     v40403_valid_symbolic_post_api = _v40403_payload_valid_symbolic_post_api_repair(case, payload, checked, external, strict_format_issues, is_guard_case=is_guard_case)
-    v40209_valid_excel_fallback = v40403_valid_symbolic_post_api if str(case.get('category') or '').strip().lower() == 'excel_numeric_regression' else _v40209_excel_payload_valid_after_local_fallback(case, payload, checked, is_guard_case=is_guard_case)
+    v53002_valid_numeric_post_api = _v53002_payload_valid_numeric_post_api_repair(case, payload, checked, external, strict_format_issues, is_guard_case=is_guard_case)
+    v40209_valid_excel_fallback = (v40403_valid_symbolic_post_api or v53002_valid_numeric_post_api) if str(case.get('category') or '').strip().lower() == 'excel_numeric_regression' else _v40209_excel_payload_valid_after_local_fallback(case, payload, checked, is_guard_case=is_guard_case)
     if payload.get('deepseekPrimaryFallback'):
         if not v40209_valid_excel_fallback:
             checked['issues'].append(f"DeepSeek-primary fell back locally: {payload.get('deepseekPrimaryFallback')}")
@@ -14184,7 +14271,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v530-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v530-02-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -14531,7 +14618,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v530-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v530-02-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:

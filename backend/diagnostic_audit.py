@@ -286,19 +286,34 @@ def _excel_visible_step_unit_explanation_issues(case: dict[str, Any], result: st
         return False
 
     visible_lines = [line.strip() for line in str(result or '').replace('\r', '\n').split('\n') if line.strip()]
+    method_ops = {'сложения': '+', 'вычитания': '-', 'умножения': '×', 'деления': '÷'}
+
+    def _v53002_normalize_column_op(op: str) -> str:
+        if op in {'-', '−', '–', '—'}:
+            return '-'
+        if op in {'×', 'x', 'X', 'х', 'Х', '*', '·'}:
+            return '×'
+        if op in {':', '/', '÷'}:
+            return '÷'
+        return op
+
+    primary_action = re.compile(r'^\s*(?:\d+[\).]\s*)?(-?\d+)\s*([+\-−–—×xXхХ*·:/÷])\s*(\d+)\s*=')
     for idx, line in enumerate(visible_lines):
-        if not re.search(r'метод\s+(?:сложения|вычитания|умножения|деления)\s+в\s+столбик', line.lower().replace('ё', 'е')):
+        method_match = re.search(r'метод\s+(сложения|вычитания|умножения|деления)\s+в\s+столбик', line.lower().replace('ё', 'е'))
+        if not method_match:
             continue
-        prev = ''
+        expected_op = method_ops.get(method_match.group(1))
+        matched_action = None
         for back in range(idx - 1, -1, -1):
             candidate = visible_lines[back]
-            if re.search(r'\d+\s*(?:[+\-−–—×xXхХ*·:/÷])\s*\d+\s*=\s*-?\d+', candidate):
-                prev = candidate
+            candidate_low = candidate.lower().replace('ё', 'е')
+            if re.match(r'^(?:ответ:|метод)\b', candidate_low):
                 break
-            if re.match(r'^(?:ответ:|метод|пояснения)\b', candidate.lower().replace('ё', 'е')):
+            action_match = primary_action.search(candidate)
+            if action_match and _v53002_normalize_column_op(action_match.group(2)) == expected_op:
+                matched_action = action_match
                 break
-        m = re.search(r'(\d+)\s*([+\-−–—×xXхХ*·:/÷])\s*(\d+)\s*=\s*(-?\d+)' , prev)
-        if m and _v40505_column_method_forbidden(m.group(1), m.group(2), m.group(3)):
+        if matched_action and _v40505_column_method_forbidden(matched_action.group(1), matched_action.group(2), matched_action.group(3)):
             issues.append('Excel numeric regression: column method must not be rendered for mental addition or subtraction with round/one-digit subtrahend rule')
             break
 
