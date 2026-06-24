@@ -5147,6 +5147,148 @@
     };
     return String(text || "").replace(/\((рубль|рубля|рублей|килограмм|килограмма|килограммов|километр|километра|километров|метр|метра|метров|сантиметр|сантиметра|сантиметров|миллиметр|миллиметра|миллиметров|дециметр|дециметра|дециметров|тонна|тонны|тонн)\)/gi, (_, unit) => `(${units[String(unit || "").toLowerCase().replace(/ё/g, "е")] || unit})`);
   }
+  // V529.04: a speed unit is a compound distance/time measurement.
+  // Recognize it generically instead of maintaining a short allow-list such as
+  // only км/ч and м/с. This prevents м/мин, см/мин and similar units from being
+  // rewritten by the counted-object fallback as (шт.).
+  const V52904_DISTANCE_UNIT_ABBREVIATIONS = new Map([
+    ["км", "км"], ["километр", "км"], ["километра", "км"], ["километры", "км"], ["километров", "км"],
+    ["м", "м"], ["метр", "м"], ["метра", "м"], ["метры", "м"], ["метров", "м"],
+    ["дм", "дм"], ["дециметр", "дм"], ["дециметра", "дм"], ["дециметры", "дм"], ["дециметров", "дм"],
+    ["см", "см"], ["сантиметр", "см"], ["сантиметра", "см"], ["сантиметры", "см"], ["сантиметров", "см"],
+    ["мм", "мм"], ["миллиметр", "мм"], ["миллиметра", "мм"], ["миллиметры", "мм"], ["миллиметров", "мм"]
+  ]);
+  const V52904_TIME_UNIT_ABBREVIATIONS = new Map([
+    ["с", "с"], ["сек", "с"], ["секунда", "с"], ["секунду", "с"], ["секунды", "с"], ["секунд", "с"],
+    ["мин", "мин"], ["минута", "мин"], ["минуту", "мин"], ["минуты", "мин"], ["минут", "мин"],
+    ["ч", "ч"], ["час", "ч"], ["часа", "ч"], ["часов", "ч"],
+    ["д", "д."], ["дн", "д."], ["день", "д."], ["дня", "д."], ["дней", "д."],
+    ["сут", "сут."], ["сутки", "сут."], ["суток", "сут."],
+    ["нед", "нед."], ["неделя", "нед."], ["неделю", "нед."], ["недели", "нед."], ["недель", "нед."],
+    ["мес", "мес."], ["месяц", "мес."], ["месяца", "мес."], ["месяцев", "мес."],
+    ["год", "год"], ["года", "год"], ["лет", "год"]
+  ]);
+  function normalizeV52904UnitKey(value) {
+    return String(value || "").toLowerCase().replace(/ё/g, "е").replace(/[.\s]+/g, "").trim();
+  }
+  function canonicalV52904RateUnit(value) {
+    let raw = String(value || "").toLowerCase().replace(/ё/g, "е").trim();
+    raw = raw.replace(/^[([{\s]+|[)\]}\s.,;:!?]+$/g, "").replace(/\s+/g, " ");
+    let match = raw.match(/^(.+?)\s*\/\s*(.+)$/);
+    if (!match) match = raw.match(/^(.+?)\s+в\s+(.+)$/);
+    if (!match) return "";
+    const distance = V52904_DISTANCE_UNIT_ABBREVIATIONS.get(normalizeV52904UnitKey(match[1]));
+    const timeUnit = V52904_TIME_UNIT_ABBREVIATIONS.get(normalizeV52904UnitKey(match[2]));
+    return distance && timeUnit ? `${distance}/${timeUnit}` : "";
+  }
+  function extractV52904RateUnitFromText(value) {
+    const source = String(value || "").toLowerCase().replace(/ё/g, "е");
+    const pattern = /(?<![а-яёa-z])(?:километр(?:а|ов|ы)?|дециметр(?:а|ов|ы)?|сантиметр(?:а|ов|ы)?|миллиметр(?:а|ов|ы)?|км|дм|см|мм|метр(?:а|ов|ы)?|м)\s*(?:\/|\s+в\s+)\s*(?:час(?:а|ов)?|минут(?:а|у|ы)?|секунд(?:а|у|ы)?|день|дня|дней|сутки|суток|неделя|неделю|недели|недель|месяц|месяца|месяцев|год|года|лет|ч|мин|сек|сут|нед|мес|дн|д|с)(?![а-яёa-z])/giu;
+    const matches = source.match(pattern) || [];
+    for (const candidate of matches) {
+      const canonical = canonicalV52904RateUnit(candidate);
+      if (canonical) return canonical;
+    }
+    return "";
+  }
+  function isV52904PlainTimeUnit(value) {
+    return V52904_TIME_UNIT_ABBREVIATIONS.has(normalizeV52904UnitKey(value));
+  }
+  function isV52904SpeedQuestion(taskText) {
+    const source = String(taskText || "").toLowerCase().replace(/ё/g, "е").trim();
+    const questionParts = source.split(/[?!.]+/).map((part) => part.trim()).filter(Boolean);
+    const question = String(getQuestionSentence(taskText) || questionParts[questionParts.length - 1] || source).toLowerCase().replace(/ё/g, "е");
+    if (!question.includes("скорост")) return false;
+    return /(?:с\s+какой\s+скоростью|каков[а-я]*\s+скорост|какой\s+(?:была\s+)?скорост|чему\s+равн[а-я]*\s+скорост|(?:найд|определ|вычисл)[а-я]*\s+(?:[^?!.]{0,30}\s+)?скорост|скорост[ьи]\s+[^?!.]*\?)/i.test(question);
+  }
+  function parseV52904DivisionStepLine(line, index) {
+    const source = String(line || "");
+    const resultMatch = source.match(/=\s*(-?\d+(?:[,.]\d+)?)/);
+    if (!resultMatch) return null;
+    const left = source.slice(0, resultMatch.index);
+    if (!/[/:÷]/.test(left)) return null;
+    const unitMatch = source.match(/=\s*-?\d+(?:[,.]\d+)?\s*\(([^)]+)\)/);
+    const explanationMatch = source.match(/\)\s*[—–-]\s*([^.!?\n]*)([.!?]*)\s*$/);
+    const prefixMatch = source.match(/^(\s*(?:\d+[).]\s*)?.*?=\s*-?\d+(?:[,.]\d+)?)/);
+    if (!prefixMatch) return null;
+    return {
+      index,
+      source,
+      prefix: prefixMatch[1].trimEnd(),
+      result: Number(String(resultMatch[1]).replace(",", ".")),
+      unit: String(unitMatch?.[1] || "").trim(),
+      rateUnit: canonicalV52904RateUnit(unitMatch?.[1] || ""),
+      explanation: String(explanationMatch?.[1] || "").trim(),
+      punctuation: String(explanationMatch?.[2] || "").trim()
+    };
+  }
+  function inferV52904RateUnitFromTask(taskText) {
+    const requested = extractV52904RateUnitFromText(getQuestionSentence(taskText) || "");
+    const explicit = requested || extractV52904RateUnitFromText(taskText);
+    if (explicit) return explicit;
+    const source = String(taskText || "").toLowerCase().replace(/ё/g, "е");
+    const distanceMatch = source.match(/-?\d+(?:[,.]\d+)?\s*(километр(?:а|ов|ы)?|дециметр(?:а|ов|ы)?|сантиметр(?:а|ов|ы)?|миллиметр(?:а|ов|ы)?|км|дм|см|мм|метр(?:а|ов|ы)?|м)(?=\s|[.,;:!?]|$)/iu);
+    const timeMatch = source.match(/-?\d+(?:[,.]\d+)?\s*(час(?:а|ов)?|минут(?:а|у|ы)?|секунд(?:а|у|ы)?|день|дня|дней|сутки|суток|неделя|неделю|недели|недель|месяц|месяца|месяцев|год|года|лет|ч|мин|сек|сут|нед|мес|дн|д|с)(?=\s|[.,;:!?]|$)/iu);
+    if (!distanceMatch || !timeMatch) return "";
+    const distance = V52904_DISTANCE_UNIT_ABBREVIATIONS.get(normalizeV52904UnitKey(distanceMatch[1]));
+    const timeUnit = V52904_TIME_UNIT_ABBREVIATIONS.get(normalizeV52904UnitKey(timeMatch[1]));
+    return distance && timeUnit ? `${distance}/${timeUnit}` : "";
+  }
+  function inferV52904SpeedExplanation(taskText) {
+    const question = String(getQuestionSentence(taskText) || taskText || "").toLowerCase().replace(/ё/g, "е");
+    if (/обратн|назад/.test(question)) return "скорость на обратном пути";
+    const orderedSubject = question.match(/\b(первого|второго)\s+(мальчика|девочки|пешехода|велосипедиста|пловца|спортсмена|автомобиля|поезда)\b/i);
+    if (orderedSubject) return `скорость ${orderedSubject[1]} ${orderedSubject[2]}`;
+    const subjects = [
+      [/девочк/i, "скорость девочки"], [/мальчик/i, "скорость мальчика"],
+      [/пешеход/i, "скорость пешехода"], [/велосипедист/i, "скорость велосипедиста"],
+      [/плов/i, "скорость пловца"], [/турист/i, "скорость туриста"],
+      [/автобус/i, "скорость автобуса"], [/поезд/i, "скорость поезда"],
+      [/катер/i, "скорость катера"], [/лодк/i, "скорость лодки"],
+      [/автомобил/i, "скорость автомобиля"], [/машин/i, "скорость машины"],
+      [/улитк/i, "скорость улитки"], [/черепах/i, "скорость черепахи"]
+    ];
+    for (const [pattern, explanation] of subjects) {
+      if (pattern.test(question)) return explanation;
+    }
+    return "скорость движения";
+  }
+  function normalizeV52904SpeedDivisionSolutionText(explanationText, taskText) {
+    const source = String(explanationText || "");
+    if (!source || !isV52904SpeedQuestion(taskText)) return source;
+    const lines = source.replace(/\r\n?/g, "\n").split("\n");
+    const answerLine = lines.find((line) => /^\s*Ответ\s*:/i.test(line)) || "";
+    const answerNumberMatch = answerLine.match(/-?\d+(?:[,.]\d+)?/);
+    const answerNumber = answerNumberMatch ? Number(answerNumberMatch[0].replace(",", ".")) : null;
+    const answerRate = extractV52904RateUnitFromText(answerLine);
+    const taskRate = inferV52904RateUnitFromTask(taskText);
+    const candidates = lines.map((line, index) => parseV52904DivisionStepLine(line, index)).filter(Boolean);
+    if (!candidates.length) return source;
+
+    const targetIndexes = new Set();
+    candidates.forEach((candidate) => {
+      if (candidate.rateUnit || /скорост/i.test(candidate.explanation)) targetIndexes.add(candidate.index);
+    });
+    if (answerNumber !== null && Number.isFinite(answerNumber)) {
+      const matching = candidates.filter((candidate) => Number.isFinite(candidate.result) && Math.abs(candidate.result - answerNumber) < 1e-9);
+      if (matching.length && (answerRate || taskRate)) targetIndexes.add(matching[matching.length - 1].index);
+    }
+    if (!targetIndexes.size) return source;
+
+    const candidateByIndex = new Map(candidates.map((candidate) => [candidate.index, candidate]));
+    return lines.map((line, index) => {
+      if (!targetIndexes.has(index)) return line;
+      const candidate = candidateByIndex.get(index);
+      const answerMatched = answerNumber !== null && Number.isFinite(candidate.result) && Math.abs(candidate.result - answerNumber) < 1e-9;
+      const rateUnit = answerMatched ? answerRate || taskRate || candidate.rateUnit : candidate.rateUnit || taskRate || answerRate;
+      if (!rateUnit) return line;
+      const existingExplanation = String(candidate.explanation || "").trim();
+      const explanation = /скорост/i.test(existingExplanation) ? existingExplanation : inferV52904SpeedExplanation(taskText);
+      const punctuation = candidate.punctuation || ".";
+      return `${candidate.prefix} (${rateUnit}) – ${explanation}${punctuation}`;
+    }).join("\n");
+  }
+
   const V40208_ALLOWED_PAREN_UNIT_COMPACTS = new Set([
     "шт", "тысшт", "чел", "уд", "руб", "коп", "долл", "доллар", "доллара", "долларов", "кг", "г", "км", "м", "дм", "см", "мм", "л", "т", "ц", "мин", "ч", "сут", "д", "дн", "нед", "мес", "год", "года", "лет", "раз", "раза", "разов", "тыслет", "км/ч", "м/с", "т", "см2", "см²", "м2", "м²"
   ]);
@@ -5161,6 +5303,7 @@
   function isV40208AllowedParenUnit(value) {
     const normalized = normalizeV40208ShortText(value);
     if (!normalized) return true;
+    if (canonicalV52904RateUnit(normalized)) return true;
     if (V40208_ALLOWED_PAREN_UNIT_COMPACTS.has(compactV40208ParenUnit(normalized))) return true;
     if (V40208_FULL_MEASURE_PAREN_UNITS.test(normalized)) return true;
     return false;
@@ -5247,6 +5390,7 @@
 
   function v40208IsCommonMeasurementParenUnit(unitText) {
     const unit = String(unitText || "").toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ").replace(/\.$/, "").trim();
+    if (canonicalV52904RateUnit(unit)) return true;
     return /^(?:шт|чел|уд|руб|коп|долл|доллар|доллара|долларов|кг|г|км|м|дм|см|мм|л|т|ц|мин|ч|сут|д|дн|мес|лет|тыс\. лет|тыс\. шт|нед\.?|раза?|разов)$/i.test(unit);
   }
 
@@ -5840,9 +5984,10 @@
   }
   function buildPreparedExplanationData({ explanationText, taskText }) {
     const kind = inferExplanationKind(taskText);
-    const operations = collectOperations(taskText, explanationText);
+    const normalizedExplanationText = normalizeV52904SpeedDivisionSolutionText(explanationText, taskText);
+    const operations = collectOperations(taskText, normalizedExplanationText);
     const models = operations.filter((operation) => shouldUseColumnForContext(operation, kind)).map((operation) => ({ operation, model: buildColumnModel(operation) }));
-    const structure = prepareExplanationStructure(String(explanationText || ""), operations, taskText);
+    const structure = prepareExplanationStructure(String(normalizedExplanationText || ""), operations, taskText);
     let nextLineIndex = 0;
     const bodyLineItems = structure.bodyLines.map((text) => lineItem(text, nextLineIndex++));
     const orderGuideRefs = {

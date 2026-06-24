@@ -6,7 +6,7 @@ from fractions import Fraction
 from typing import Any
 import re
 
-from backend.service import APP_RELEASE, SOLVER_VERSION, generate_explanation_response, _v4013_known_name_map, _v4013_is_stone_distribution_task, _v4017_abbreviate_si_in_answer, _v4017_lowercase_common_u_nouns, _v4017_fix_extra_name_before_group_subject, _v4018_fix_measure_answer_order, _v40204_concise_dash_explanation, _v40204_concise_counted_dash_explanation
+from backend.service import APP_RELEASE, SOLVER_VERSION, generate_explanation_response, _v4013_known_name_map, _v4013_is_stone_distribution_task, _v4017_abbreviate_si_in_answer, _v4017_lowercase_common_u_nouns, _v4017_fix_extra_name_before_group_subject, _v4018_fix_measure_answer_order, _v40204_concise_dash_explanation, _v40204_concise_counted_dash_explanation, _v52904_rate_unit_abbrev, _v52904_speed_division_semantic_issues
 
 FORBIDDEN_RESULT_MARKERS = (
     'Применяем правило:',
@@ -309,7 +309,7 @@ def _excel_visible_step_unit_explanation_issues(case: dict[str, Any], result: st
             break
         unit_match = re.search(r'=\s*-?\d+(?:[,.]\d+)?\s*\(([^)]+)\)\s*[—–-]', line)
         unit_text = str(unit_match.group(1) if unit_match else '').lower().replace('ё', 'е')
-        measurement_unit_ok = bool(re.search(r'^(?:кг|г|т|л|м|см|дм|мм|км|руб\.?|коп\.?|евро|мин\.?|ч\.?|час(?:а|ов)?|д\.?|дн\.?|нед\.?|мес\.?|сек\.?|с|раза?|м/с|км/ч|м/мин|м/ч|см/ч|км/д\.?|км/день|ц)$', unit_text.strip()))
+        measurement_unit_ok = bool(re.search(r'^(?:кг|г|т|л|м|см|дм|мм|км|руб\.?|коп\.?|евро|мин\.?|ч\.?|час(?:а|ов)?|д\.?|дн\.?|нед\.?|мес\.?|сек\.?|с|раза?|м/с|км/ч|м/мин|м/ч|см/ч|км/д\.?|км/день|ц)$', unit_text.strip())) or bool(_v52904_rate_unit_abbrev(unit_text))
         intermediate_person_unit_ok = bool(re.search(r'чел|человек', unit_text))
         if count_unit_kind == 'piece' and 'шт' not in unit_text and not measurement_unit_ok and not intermediate_person_unit_ok:
             issues.append('Excel numeric regression: counted objects must use (шт.) or (тыс. шт.) in visible calculation parentheses')
@@ -453,6 +453,15 @@ def _excel_visible_step_unit_explanation_issues(case: dict[str, Any], result: st
         issues.append('Excel numeric regression: visible Ответ line has wrong litre plural form')
     if re.search(r'крови\s+у\s+[а-яa-z-]+\s+\d+\s+литр', answer):
         issues.append('Excel numeric regression: visible Ответ line should put the quantity before “крови у ...”')
+    speed_issue_messages = {
+        'speed_division_missing_rate_unit': 'Excel numeric regression: distance divided by time for a requested speed must use a compound rate unit such as (м/мин) or (км/ч)',
+        'speed_division_explanation_not_speed': 'Excel numeric regression: speed calculation explanation after dash must explicitly name “скорость”',
+        'speed_division_rate_unit_mismatch': 'Excel numeric regression: speed calculation unit must match the distance/time unit shown in the final answer',
+    }
+    for speed_issue in _v52904_speed_division_semantic_issues(str(case.get('text') or ''), result):
+        message = speed_issue_messages.get(speed_issue)
+        if message and message not in issues:
+            issues.append(message)
     return issues
 
 def _loose_expected_phrase_present(expected: str, result: str) -> bool:

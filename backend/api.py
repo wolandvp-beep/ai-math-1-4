@@ -30,7 +30,7 @@ from backend.platform.modules.core.public.services.access.service import (
     LimitExceededError,
 )
 from backend.platform.modules.core.public.services.access.store import JsonAccessStateStore, resolve_state_file_path
-from backend.service import APP_RELEASE, SOLVER_VERSION, attach_release, canonicalize_v309_math_information_response, canonicalize_v310_numbers_quantities_response, canonicalize_v311_arithmetic_actions_response, canonicalize_v312_text_problems_response, canonicalize_v313_geometry_response, canonicalize_v314_information_response, _v312_case_specs, _v312_norm_key, _v312_payload, _v313_case_specs, _v313_norm_key, _v313_payload, _v314_case_specs, _v314_norm_key, _v314_find_spec, _v314_payload, deepseek_api_key_configured, generate_explanation_response, prevalidate_explanation_request, resolve_solver_mode, _v4013_known_name_map, _v4013_is_stone_distribution_task, _v4011_norm_key, _v4017_abbreviate_si_in_answer, _v4017_lowercase_common_u_nouns, _v4017_fix_extra_name_before_group_subject, _v4018_fix_measure_answer_order, _v40404_convert_thousand_si_phrase, _v40204_concise_dash_explanation, _v40204_concise_counted_dash_explanation, _v40502_batch_401_500_payload, _v40601_batch_501_600_payload, _v40701_batch_601_700_payload, _v40801_batch_701_800_payload, _v40902_batch_801_900_payload, _v41002_batch_901_1000_payload, _v41102_batch_1001_1100_payload, _v41201_batch_1101_1200_payload, _v41302_batch_1201_1300_payload, _v41401_batch_1301_1400_payload
+from backend.service import APP_RELEASE, SOLVER_VERSION, attach_release, canonicalize_v309_math_information_response, canonicalize_v310_numbers_quantities_response, canonicalize_v311_arithmetic_actions_response, canonicalize_v312_text_problems_response, canonicalize_v313_geometry_response, canonicalize_v314_information_response, _v312_case_specs, _v312_norm_key, _v312_payload, _v313_case_specs, _v313_norm_key, _v313_payload, _v314_case_specs, _v314_norm_key, _v314_find_spec, _v314_payload, deepseek_api_key_configured, generate_explanation_response, prevalidate_explanation_request, resolve_solver_mode, _v4013_known_name_map, _v4013_is_stone_distribution_task, _v4011_norm_key, _v4017_abbreviate_si_in_answer, _v4017_lowercase_common_u_nouns, _v4017_fix_extra_name_before_group_subject, _v4018_fix_measure_answer_order, _v40404_convert_thousand_si_phrase, _v40204_concise_dash_explanation, _v40204_concise_counted_dash_explanation, _v40502_batch_401_500_payload, _v40601_batch_501_600_payload, _v40701_batch_601_700_payload, _v40801_batch_701_800_payload, _v40902_batch_801_900_payload, _v41002_batch_901_1000_payload, _v41102_batch_1001_1100_payload, _v41201_batch_1101_1200_payload, _v41302_batch_1201_1300_payload, _v41401_batch_1301_1400_payload, _v52904_rate_unit_abbrev, _v52904_speed_division_semantic_issues
 from backend.diagnostic_audit import DEFAULT_AUDIT_CASES, _check_payload, _normalize_case, run_math_audit
 
 
@@ -212,7 +212,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V529.04 — V501.03 architecture / batch 2001–2100 reverse-speed unit guard and division column sign fix',
+        'nextAuditPlannedMapStep': 'V529.04 — semantic speed-unit rule: distance divided by time must render a compound rate unit and a speed explanation; batch 2001–2100',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -247,7 +247,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditQueryOrderSafe': True,
         'nextAuditNoSectionEntityRisk': True,
         'nextAuditNoQueryParamReorderRisk': True,
-        'nextAuditNote': 'V529.03 запускает batch 2001–2100 через self-hosted /app frontend: браузер вводит Excel-задания, нажимает основную кнопку решения, ждёт #resultBox и сверяет numeric expected с answer_number/final answer/Ответ. Реальный external API proof обязателен.',
+        'nextAuditNote': 'V529.04 запускает batch 2001–2100 через self-hosted /app frontend и дополнительно проверяет семантику шагов скорости: деление расстояния на время обязано иметь составную единицу скорости и пояснение со словом «скорость». Реальный external API proof обязателен.',
     }
 
 
@@ -3757,9 +3757,6 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             canonical_v52902_audit_payload = _api_v52902_fix_rows_2080_2095(text, payload)
             if isinstance(canonical_v52902_audit_payload, dict) and canonical_v52902_audit_payload.get('result'):
                 payload = canonical_v52902_audit_payload
-            canonical_v52904_audit_payload = _api_v52904_fix_stadium_return_speed(text, payload)
-            if isinstance(canonical_v52904_audit_payload, dict) and canonical_v52904_audit_payload.get('result'):
-                payload = canonical_v52904_audit_payload
         counter['apiRouteStatusCode'] = 200 if not payload.get('error') else 400
         counter['apiRouteResponseRelease'] = APP_RELEASE
         counter['apiRouteResponseSolverVersion'] = SOLVER_VERSION
@@ -4247,7 +4244,7 @@ def _live_audit_user_visible_solution_format_issues(result_text: str, case_text:
             unit_text = str(unit_match.group(1) or '').strip().lower().replace('ё', 'е')
             compact_unit = re.sub(r'\s+', ' ', unit_text)
             compact_unit_key = compact_unit.rstrip('.')
-            if re.search(r'[а-яa-z]', compact_unit_key) and compact_unit_key not in allowed_unit_markers:
+            if re.search(r'[а-яa-z]', compact_unit_key) and compact_unit_key not in allowed_unit_markers and not _v52904_rate_unit_abbrev(compact_unit_key):
                 issues.append('UI proof: counted objects must use (шт.) in visible calculation parentheses')
                 break
         expl_match = re.search(r'\)\s*[—–-]\s*([^.!?\n]+)', clean)
@@ -4256,6 +4253,15 @@ def _live_audit_user_visible_solution_format_issues(result_text: str, case_text:
             if expl in {'осталось', 'стало', 'было', 'получилось'}:
                 issues.append('UI proof: visible calculation explanation after dash must name what was counted, not only state “осталось/стало”')
                 break
+    speed_issue_messages = {
+        'speed_division_missing_rate_unit': 'UI proof: distance divided by time for a requested speed must use a compound rate unit such as (м/мин) or (км/ч)',
+        'speed_division_explanation_not_speed': 'UI proof: speed calculation explanation after dash must explicitly name “скорость”',
+        'speed_division_rate_unit_mismatch': 'UI proof: speed calculation unit must match the distance/time unit shown in the final answer',
+    }
+    for speed_issue in _v52904_speed_division_semantic_issues(case_text, result_text):
+        message = speed_issue_messages.get(speed_issue)
+        if message and message not in issues:
+            issues.append(message)
     return issues
 
 
@@ -4524,7 +4530,7 @@ def _live_audit_excel_visible_unit_explanation_issues(case: dict[str, Any], resu
             break
         unit_match = re.search(r'=\s*-?\d+(?:[,.]\d+)?\s*\(([^)]+)\)\s*[—–-]', clean)
         unit_text = str(unit_match.group(1) if unit_match else '').lower().replace('ё', 'е')
-        measurement_unit_ok = bool(re.search(r'^(?:кг|г|т|л|м|см|дм|мм|км|руб\.?|коп\.?|евро|мин\.?|ч\.?|час(?:а|ов)?|д\.?|дн\.?|нед\.?|мес\.?|сек\.?|с|раза?|м/с|км/ч|км/мин|м/мин|м/ч|см/мин|см/ч|км/д\.?|км/день|ц)$', unit_text.strip()))
+        measurement_unit_ok = bool(re.search(r'^(?:кг|г|т|л|м|см|дм|мм|км|руб\.?|коп\.?|евро|мин\.?|ч\.?|час(?:а|ов)?|д\.?|дн\.?|нед\.?|мес\.?|сек\.?|с|раза?|м/с|км/ч|км/мин|м/мин|м/ч|см/мин|см/ч|км/д\.?|км/день|ц)$', unit_text.strip())) or bool(_v52904_rate_unit_abbrev(unit_text))
         intermediate_person_unit_ok = bool(re.search(r'чел|человек', unit_text))
         if count_unit_kind == 'piece' and 'шт' not in unit_text and not measurement_unit_ok and not intermediate_person_unit_ok:
             issues.append('strict proof: counted objects must use (шт.) or (тыс. шт.) in visible calculation parentheses')
@@ -4699,6 +4705,15 @@ def _live_audit_excel_visible_unit_explanation_issues(case: dict[str, Any], resu
         issues.append('strict proof: visible Ответ line has wrong litre plural form')
     if re.search(r'крови\s+у\s+[а-яa-z-]+\s+\d+\s+литр', answer):
         issues.append('strict proof: visible Ответ line should put the quantity before “крови у ...”')
+    speed_issue_messages = {
+        'speed_division_missing_rate_unit': 'strict proof: distance divided by time for a requested speed must use a compound rate unit such as (м/мин) or (км/ч)',
+        'speed_division_explanation_not_speed': 'strict proof: speed calculation explanation after dash must explicitly name “скорость”',
+        'speed_division_rate_unit_mismatch': 'strict proof: speed calculation unit must match the distance/time unit shown in the final answer',
+    }
+    for speed_issue in _v52904_speed_division_semantic_issues(str(case.get('text') or ''), result_text):
+        message = speed_issue_messages.get(speed_issue)
+        if message and message not in issues:
+            issues.append(message)
     return issues
 
 
@@ -9530,123 +9545,6 @@ def _api_v52902_fix_rows_2080_2095(original_text: str, payload: dict[str, Any] |
     return out
 
 
-# --- V529.04 row/general guard for reverse-speed m/min unit and concise explanation ---
-def _api_v52904_norm_text(value: Any) -> str:
-    return re.sub(r'\s+', ' ', str(value or '').replace('\u00a0', ' ')).strip().lower().replace('ё', 'е')
-
-
-def _api_v52904_blob(original_text: str = '', payload: dict[str, Any] | None = None) -> str:
-    parts = [original_text]
-    if isinstance(payload, dict):
-        for key in ('result', 'userVisibleResultText', 'final_answer', 'answer', 'explanation', 'inputText', 'taskText'):
-            parts.append(str(payload.get(key) or ''))
-    return _api_v52904_norm_text(' '.join(parts))
-
-
-def _api_v52904_is_stadium_return_speed(original_text: str = '', payload: dict[str, Any] | None = None) -> bool:
-    found = None
-    try:
-        found = _api_v52901_batch_2001_2100_case_for_text(original_text)
-    except Exception:
-        found = None
-    if found and int(found[0]) == 2001:
-        return True
-    blob = _api_v52904_blob(original_text, payload)
-    # Manual user task may differ only by spaces/punctuation from the Excel text.
-    return (
-        'расстояние до стадиона' in blob and
-        '1200' in blob and
-        '15 мин' in blob and
-        '5 мин' in blob and
-        'скорост' in blob and
-        'обрат' in blob and
-        ('мальчик' in blob or 'мальчик ш' in blob)
-    )
-
-
-def _api_v52904_stadium_return_speed_visible_text(original_text: str = '') -> str:
-    task = str(original_text or '').strip() or 'Расстояние до стадиона 1200 м мальчик прошёл за 15 мин. На обратный путь он потратил на 5 мин больше. С какой скоростью мальчик шёл обратно?'
-    return (
-        'Задача.\n'
-        f'{task}\n'
-        'Решение.\n'
-        '1) 15 + 5 = 20 (мин) – время на обратный путь.\n'
-        '2) 1200 : 20 = 60 (м/мин) – скорость на обратном пути.\n'
-        'Ответ: обратно мальчик шёл со скоростью 60 м/мин.'
-    )
-
-
-def _api_v52904_sanitize_speed_result_text(original_text: str = '', payload: dict[str, Any] | None = None, text_value: Any = None) -> str:
-    text = str(text_value if text_value is not None else (payload.get('result') if isinstance(payload, dict) else '') or '')
-    if not text:
-        return text
-    blob = _api_v52904_blob(original_text, payload)
-    if not ('скорост' in blob and ('обрат' in blob or 'назад' in blob)):
-        return text
-    # Protect the common formatter failure: a speed quotient is rendered as counted objects
-    # and the dash explanation copies a context fragment such as "мин больше".
-    replacements = {
-        '1200 : 20 = 60 (шт.) – мин больше': '1200 : 20 = 60 (м/мин) – скорость на обратном пути',
-        '1200 : 20 = 60 (шт.) – время на обратный путь': '1200 : 20 = 60 (м/мин) – скорость на обратном пути',
-        '1200 : 20 = 60 (шт.) – обратно': '1200 : 20 = 60 (м/мин) – скорость на обратном пути',
-        '1200 : 20 = 60 (шт.)': '1200 : 20 = 60 (м/мин)',
-    }
-    out = text
-    for a, b in replacements.items():
-        out = out.replace(a, b)
-    out = re.sub(r'1200\s*:\s*20\s*=\s*60\s*\(шт\.\)\s*[–—-]\s*[^.\n]*(?=\.)', '1200 : 20 = 60 (м/мин) – скорость на обратном пути', out)
-    out = re.sub(r'1200\s*:\s*20\s*=\s*60\s*\(шт\.\)', '1200 : 20 = 60 (м/мин)', out)
-    return out
-
-
-def _api_v52904_fix_stadium_return_speed(original_text: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not isinstance(payload, dict):
-        return payload
-    row_or_manual = _api_v52904_is_stadium_return_speed(original_text, payload)
-    result_text = str(payload.get('result') or payload.get('userVisibleResultText') or '')
-    has_bad_speed = '1200' in result_text and '60 (шт.)' in result_text and ('мин больше' in result_text or 'скорост' in _api_v52904_blob(original_text, payload))
-    if not row_or_manual and not has_bad_speed:
-        return payload
-    out = dict(payload)
-    fixed_text = _api_v52904_stadium_return_speed_visible_text(original_text) if row_or_manual else _api_v52904_sanitize_speed_result_text(original_text, payload, result_text)
-    # If the sanitizer only replaced one line, ensure final answer is complete and consistent.
-    if 'Ответ:' not in fixed_text:
-        fixed_text = fixed_text.rstrip() + '\nОтвет: обратно мальчик шёл со скоростью 60 м/мин.'
-    out.update({
-        'result': fixed_text,
-        'explanation': fixed_text,
-        'userVisibleResultText': fixed_text,
-        'clientDisplayedResultText': fixed_text,
-        'answer': 'обратно мальчик шёл со скоростью 60 м/мин',
-        'final_answer': 'обратно мальчик шёл со скоростью 60 м/мин',
-        'answer_number': '60',
-        'answer_unit': 'метров в минуту',
-        'v52904ReverseSpeedUnitGuard': True,
-        'v52904ExcelRow': 2001,
-    })
-    out['structured_solution'] = [
-        {'kind': 'calculation', 'text': '15 + 5 = 20 (мин) – время на обратный путь'},
-        {'kind': 'calculation', 'text': '1200 : 20 = 60 (м/мин) – скорость на обратном пути'},
-        {'kind': 'answer', 'text': 'Ответ: обратно мальчик шёл со скоростью 60 м/мин.'},
-    ]
-    out['structuredSolution'] = out['structured_solution']
-    source = str(out.get('source') or 'deepseek-primary; api-primary-verified-formatted-v501.03')
-    if 'v529.04-reverse-speed-unit-guard' not in source:
-        source = source + '; v529.04-reverse-speed-unit-guard'
-    out['source'] = source
-    marker = 'v529.04-reverse-speed-unit-visible-guard'
-    contract = str(out.get('visibleResultContract') or '').strip()
-    if marker not in contract:
-        out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
-    verifier = str(out.get('verifier') or '').strip()
-    if marker not in verifier:
-        out['verifier'] = (verifier + '; ' if verifier else '') + marker
-    # Remove only stale unit/explanation issues caused by the old text.
-    out['issues'] = [issue for issue in list(out.get('issues') or []) if '1200' not in str(issue) and 'шт' not in str(issue).lower() and 'мин больше' not in str(issue).lower()]
-    out['suspiciousReasons'] = [issue for issue in list(out.get('suspiciousReasons') or []) if '1200' not in str(issue) and 'шт' not in str(issue).lower() and 'мин больше' not in str(issue).lower()]
-    return out
-
-
 # --- V528.01 route-level exact visible contract for Excel rows 1901-2000 ---
 _V52801_BATCH_1901_2000_SPECS_BY_ROW = {1901: (['z : (n + m) = z : (n + m) (ч) – время до встречи',
          'z : (n + m) · n = z : (n + m) · n (км) – путь первого туриста',
@@ -11023,9 +10921,6 @@ async def _solve_text(*, text: str, token: str | None, install_id: str | None, a
         v52902_fixed_prevalidated = _api_v52902_fix_rows_2080_2095(text, response_payload)
         if isinstance(v52902_fixed_prevalidated, dict):
             response_payload = attach_release(v52902_fixed_prevalidated)
-        v52904_fixed_prevalidated = _api_v52904_fix_stadium_return_speed(text, response_payload)
-        if isinstance(v52904_fixed_prevalidated, dict):
-            response_payload = attach_release(v52904_fixed_prevalidated)
         if audit_context and audit_context.get('browserClientFetchAudit'):
             zero_counter = {
                 'externalApiAttempts': 0,
@@ -11208,9 +11103,6 @@ async def _solve_text(*, text: str, token: str | None, install_id: str | None, a
         v52902_fixed_response = _api_v52902_fix_rows_2080_2095(text, response_payload)
         if isinstance(v52902_fixed_response, dict):
             response_payload = attach_release(v52902_fixed_response)
-        v52904_fixed_response = _api_v52904_fix_stadium_return_speed(text, response_payload)
-        if isinstance(v52904_fixed_response, dict):
-            response_payload = attach_release(v52904_fixed_response)
         if audit_context and audit_context.get('browserClientFetchAudit') and isinstance(external_counter, dict):
             receipt = _live_audit_record_browser_client_case(audit_context, text, response_payload, external_counter)
             response_payload['browserClientAuditReceipt'] = receipt
@@ -12807,7 +12699,6 @@ async def live_audit_ui_render_record_dom(request: Request, release_token: str, 
         data['apiResultText'] = fixed_v52902_dom
         if isinstance(api_payload, dict):
             api_payload = _api_v52902_fix_rows_2080_2095(case.get('text') or data.get('inputText') or '', api_payload) or api_payload
-            api_payload = _api_v52904_fix_stadium_return_speed(case.get('text') or data.get('inputText') or '', api_payload) or api_payload
             data['apiPayload'] = api_payload
     if v52902_row2095_dom_record:
         fixed_v52902_dom = _api_v52902_row2095_visible_text(case.get('text') or data.get('inputText') or '')
@@ -12820,26 +12711,11 @@ async def live_audit_ui_render_record_dom(request: Request, release_token: str, 
         data['ttsSourceText'] = fixed_v52902_dom
         if isinstance(api_payload, dict):
             api_payload = _api_v52902_fix_rows_2080_2095(case.get('text') or data.get('inputText') or '', api_payload) or api_payload
-            api_payload = _api_v52904_fix_stadium_return_speed(case.get('text') or data.get('inputText') or '', api_payload) or api_payload
             data['apiPayload'] = api_payload
     # V527.09: standalone frontend-operator posts DOM proof to this endpoint
     # (not /browser-ui/record-dom). Sanitize row 1821 here as well so the proof
     # row and the final report use the corrected speed unit in visible text.
     v52709_row1821_dom_record = _api_v52708_task_is_row1821_day_speed(case.get('text') or data.get('inputText') or '') or _api_v52708_is_row1821_day_speed_text(' '.join(str(x or '') for x in (dom_text, api_text, data.get('inputText'), data.get('taskText'))))
-    v52904_speed_dom_record = _api_v52904_is_stadium_return_speed(case.get('text') or data.get('inputText') or '', api_payload) or ('1200 : 20 = 60 (шт.)' in dom_text and 'стадион' in _api_v52904_blob(case.get('text') or data.get('inputText') or '', api_payload))
-    if v52904_speed_dom_record:
-        fixed_v52904_dom = _api_v52904_stadium_return_speed_visible_text(case.get('text') or data.get('inputText') or '')
-        dom_text = _live_audit_normalize_visible_text(fixed_v52904_dom)
-        api_text = _live_audit_normalize_visible_text(fixed_v52904_dom)
-        data = dict(data)
-        data['domResultText'] = fixed_v52904_dom
-        data['clientDisplayedResultText'] = fixed_v52904_dom
-        data['apiResultText'] = fixed_v52904_dom
-        data['ttsSourceText'] = fixed_v52904_dom
-        if isinstance(api_payload, dict):
-            api_payload = _api_v52904_fix_stadium_return_speed(case.get('text') or data.get('inputText') or '', api_payload) or api_payload
-            data['apiPayload'] = api_payload
-
     if v52709_row1821_dom_record:
         fixed_v52709_dom = _api_v52708_row1821_fixed_visible_text()
         dom_text = _live_audit_normalize_visible_text(fixed_v52709_dom)
@@ -12899,21 +12775,6 @@ async def live_audit_ui_render_record_dom(request: Request, release_token: str, 
                 row['actualAnswerNumber'] = ['2', '2']
                 row['issues'] = _api_v52902_clean_issue_list(row.get('issues'), row2095=True)
                 row['suspiciousReasons'] = _api_v52902_clean_issue_list(row.get('suspiciousReasons'), row2095=True)
-        if v52904_speed_dom_record:
-            fixed_row = _api_v52904_fix_stadium_return_speed(case.get('text') or data.get('inputText') or '', row)
-            if isinstance(fixed_row, dict):
-                row = fixed_row
-            row['ok'] = True
-            fixed_v52904 = _api_v52904_stadium_return_speed_visible_text(case.get('text') or data.get('inputText') or '')
-            row['resultText'] = fixed_v52904
-            row['userVisibleResultText'] = fixed_v52904
-            row['frontendDomResultText'] = fixed_v52904
-            row['uiResultBoxText'] = fixed_v52904
-            row['clientDisplayedResultText'] = fixed_v52904
-            row['actualAnswerLine'] = 'обратно мальчик шёл со скоростью 60 м/мин'
-            row['actualAnswerNumber'] = '60'
-            row['issues'] = []
-
         if v52709_row1821_dom_record:
             fixed_row = _api_v52708_row1821_payload(case.get('text') or data.get('inputText') or '', row)
             if isinstance(fixed_row, dict):

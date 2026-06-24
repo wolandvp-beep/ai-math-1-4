@@ -2043,6 +2043,203 @@ def _v4011_norm_key(value: str) -> str:
     return str(value or '').strip().lower().replace('ё', 'е').rstrip('.,;:!?')
 
 
+# V529.04: compound motion units are measurements, not counted objects.
+# Keep this parser generic: every supported distance unit may be combined with
+# every supported time unit in slash form ("м/мин") or Russian full form
+# ("метров в минуту").
+_V52904_DISTANCE_UNIT_ABBREVIATIONS: dict[str, str] = {
+    'км': 'км', 'километр': 'км', 'километра': 'км', 'километры': 'км', 'километров': 'км',
+    'м': 'м', 'метр': 'м', 'метра': 'м', 'метры': 'м', 'метров': 'м',
+    'дм': 'дм', 'дециметр': 'дм', 'дециметра': 'дм', 'дециметры': 'дм', 'дециметров': 'дм',
+    'см': 'см', 'сантиметр': 'см', 'сантиметра': 'см', 'сантиметры': 'см', 'сантиметров': 'см',
+    'мм': 'мм', 'миллиметр': 'мм', 'миллиметра': 'мм', 'миллиметры': 'мм', 'миллиметров': 'мм',
+}
+_V52904_TIME_UNIT_ABBREVIATIONS: dict[str, str] = {
+    'с': 'с', 'сек': 'с', 'секунда': 'с', 'секунду': 'с', 'секунды': 'с', 'секунд': 'с',
+    'мин': 'мин', 'минута': 'мин', 'минуту': 'мин', 'минуты': 'мин', 'минут': 'мин',
+    'ч': 'ч', 'час': 'ч', 'часа': 'ч', 'часов': 'ч',
+    'д': 'д.', 'дн': 'д.', 'день': 'д.', 'дня': 'д.', 'дней': 'д.',
+    'сут': 'сут.', 'сутки': 'сут.', 'суток': 'сут.',
+    'нед': 'нед.', 'неделя': 'нед.', 'неделю': 'нед.', 'недели': 'нед.', 'недель': 'нед.',
+    'мес': 'мес.', 'месяц': 'мес.', 'месяца': 'мес.', 'месяцев': 'мес.',
+    'год': 'год', 'года': 'год', 'лет': 'год',
+}
+
+
+def _v52904_rate_unit_parts(unit: str) -> tuple[str, str] | None:
+    raw = str(unit or '').strip().lower().replace('ё', 'е')
+    raw = raw.strip('()[]{} \t\r\n.,;:!?')
+    raw = re.sub(r'\s+', ' ', raw)
+    # Accept both compact notation and natural Russian wording.
+    match = re.fullmatch(r'(.+?)\s*/\s*(.+)', raw)
+    if not match:
+        match = re.fullmatch(r'(.+?)\s+в\s+(.+)', raw)
+    if not match:
+        return None
+    distance_key = re.sub(r'[.\s]+', '', match.group(1).strip())
+    time_key = re.sub(r'[.\s]+', '', match.group(2).strip())
+    distance = _V52904_DISTANCE_UNIT_ABBREVIATIONS.get(distance_key)
+    time_unit = _V52904_TIME_UNIT_ABBREVIATIONS.get(time_key)
+    if not distance or not time_unit:
+        return None
+    return distance, time_unit
+
+
+def _v52904_rate_unit_abbrev(unit: str) -> str:
+    parts = _v52904_rate_unit_parts(unit)
+    return f'{parts[0]}/{parts[1]}' if parts else ''
+
+
+def _v52904_is_speed_question(text: str) -> bool:
+    source = str(text or '').lower().replace('ё', 'е').strip()
+    questions = [part.strip() for part in re.findall(r'[^?!.]*\?', source)]
+    sentences = [part.strip() for part in re.split(r'[?!.]+', source) if part.strip()]
+    question = questions[-1] if questions else (sentences[-1] if sentences else source)
+    if 'скорост' not in question:
+        return False
+    return bool(re.search(
+        r'(?:с\s+какой\s+скоростью|каков[а-я]*\s+скорост|какой\s+(?:была\s+)?скорост|'
+        r'чему\s+равн[а-я]*\s+скорост|(?:найд|определ|вычисл)[а-я]*\s+(?:[^?!.]{0,30}\s+)?скорост|'
+        r'скорост[ьи]\s+[^?!.]*\?)',
+        question,
+        flags=re.IGNORECASE,
+    ))
+
+
+_V52904_RATE_UNIT_IN_TEXT_RE = re.compile(
+    r'(?<![а-яёa-z])(?:километр(?:а|ов|ы)?|дециметр(?:а|ов|ы)?|сантиметр(?:а|ов|ы)?|миллиметр(?:а|ов|ы)?|км|дм|см|мм|метр(?:а|ов|ы)?|м)'
+    r'\s*(?:/|\s+в\s+)\s*'
+    r'(?:час(?:а|ов)?|минут(?:а|у|ы)?|секунд(?:а|у|ы)?|день|дня|дней|сутки|суток|неделя|неделю|недели|недель|месяц|месяца|месяцев|год|года|лет|ч|мин|сек|сут|нед|мес|дн|д|с)'
+    r'(?![а-яёa-z])',
+    flags=re.IGNORECASE,
+)
+
+
+def _v52904_extract_rate_unit(text: str) -> str:
+    for match in _V52904_RATE_UNIT_IN_TEXT_RE.finditer(str(text or '').lower().replace('ё', 'е')):
+        canonical = _v52904_rate_unit_abbrev(match.group(0))
+        if canonical:
+            return canonical
+    return ''
+
+
+def _v52904_infer_rate_unit_from_task(task_text: str) -> str:
+    source = str(task_text or '').lower().replace('ё', 'е')
+    question_matches = re.findall(r'[^?!.]*\?', source)
+    question = question_matches[-1] if question_matches else ''
+    # An explicitly requested unit in the question has priority over a known
+    # speed unit in the condition.
+    explicit = _v52904_extract_rate_unit(question) or _v52904_extract_rate_unit(source)
+    if explicit:
+        return explicit
+    distance_match = re.search(
+        r'-?\d+(?:[,.]\d+)?\s*'
+        r'(километр(?:а|ов|ы)?|дециметр(?:а|ов|ы)?|сантиметр(?:а|ов|ы)?|миллиметр(?:а|ов|ы)?|км|дм|см|мм|метр(?:а|ов|ы)?|м)'
+        r'(?=\s|[.,;:!?]|$)',
+        source,
+        flags=re.IGNORECASE,
+    )
+    time_match = re.search(
+        r'-?\d+(?:[,.]\d+)?\s*'
+        r'(час(?:а|ов)?|минут(?:а|у|ы)?|секунд(?:а|у|ы)?|день|дня|дней|сутки|суток|неделя|неделю|недели|недель|месяц|месяца|месяцев|год|года|лет|ч|мин\.?|сек\.?|сут\.?|нед\.?|мес\.?|дн\.?|д\.?|с)'
+        r'(?=\s|[.,;:!?]|$)',
+        source,
+        flags=re.IGNORECASE,
+    )
+    if not distance_match or not time_match:
+        return ''
+    distance_key = re.sub(r'[.\s]+', '', distance_match.group(1).lower().replace('ё', 'е'))
+    time_key = re.sub(r'[.\s]+', '', time_match.group(1).lower().replace('ё', 'е'))
+    distance = _V52904_DISTANCE_UNIT_ABBREVIATIONS.get(distance_key)
+    time_unit = _V52904_TIME_UNIT_ABBREVIATIONS.get(time_key)
+    return f'{distance}/{time_unit}' if distance and time_unit else ''
+
+
+def _v52904_speed_division_semantic_issues(task_text: str, result_text: str) -> list[str]:
+    """Return general semantic issue codes for visible speed calculations.
+
+    A division line that supplies the requested speed must use a compound
+    distance/time unit and its dash explanation must explicitly name speed.
+    The target line is identified by semantics (rate unit, speed explanation,
+    or equality with the final speed answer), never by an Excel row or wording.
+    """
+    if not _v52904_is_speed_question(task_text):
+        return []
+    lines = [line.strip() for line in str(result_text or '').replace('\r', '\n').split('\n') if line.strip()]
+    answer_line = next((line for line in lines if re.match(r'^ответ\s*:', line, flags=re.IGNORECASE)), '')
+    answer_number_match = re.search(r'-?\d+(?:[,.]\d+)?', answer_line)
+    try:
+        answer_number = float(answer_number_match.group(0).replace(',', '.')) if answer_number_match else None
+    except Exception:
+        answer_number = None
+    answer_rate = _v52904_extract_rate_unit(answer_line)
+    task_rate = _v52904_infer_rate_unit_from_task(task_text)
+    expected_rate = answer_rate or task_rate
+
+    candidates: list[dict[str, Any]] = []
+    for index, line in enumerate(lines):
+        result_match = re.search(r'=\s*(-?\d+(?:[,.]\d+)?)', line)
+        if not result_match:
+            continue
+        left = line[:result_match.start()]
+        if not re.search(r'[:/÷]', left):
+            continue
+        unit_match = re.search(r'=\s*-?\d+(?:[,.]\d+)?\s*\(([^)]+)\)', line)
+        explanation_match = re.search(r'\)\s*[—–-]\s*([^.!?\n]*)(?:[.!?]*)\s*$', line)
+        try:
+            result_number = float(result_match.group(1).replace(',', '.'))
+        except Exception:
+            result_number = None
+        unit_text = str(unit_match.group(1) if unit_match else '').strip()
+        explanation = str(explanation_match.group(1) if explanation_match else '').strip().lower().replace('ё', 'е')
+        candidates.append({
+            'index': index,
+            'line': line,
+            'result': result_number,
+            'unit': unit_text,
+            'rate': _v52904_rate_unit_abbrev(unit_text),
+            'explanation': explanation,
+        })
+    if not candidates:
+        return []
+
+    target_indexes = {
+        int(candidate['index'])
+        for candidate in candidates
+        if candidate.get('rate') or 'скорост' in str(candidate.get('explanation') or '')
+    }
+    if answer_number is not None and expected_rate:
+        matching = [
+            candidate for candidate in candidates
+            if candidate.get('result') is not None and abs(float(candidate['result']) - answer_number) < 1e-9
+        ]
+        if matching:
+            target_indexes.add(int(matching[-1]['index']))
+    elif expected_rate and candidates:
+        # A speed question with a known distance/time unit but no numeric answer
+        # still has one final division step; use the last division candidate.
+        target_indexes.add(int(candidates[-1]['index']))
+    if not target_indexes:
+        return []
+
+    issues: list[str] = []
+    for candidate in candidates:
+        if int(candidate['index']) not in target_indexes:
+            continue
+        rate = str(candidate.get('rate') or '')
+        explanation = str(candidate.get('explanation') or '')
+        if not rate:
+            issues.append('speed_division_missing_rate_unit')
+        if 'скорост' not in explanation:
+            issues.append('speed_division_explanation_not_speed')
+        if (
+            expected_rate and answer_number is not None and candidate.get('result') is not None
+            and abs(float(candidate['result']) - answer_number) < 1e-9 and rate and rate != expected_rate
+        ):
+            issues.append('speed_division_rate_unit_mismatch')
+    return list(dict.fromkeys(issues))
+
+
 def _v4011_plural(value: int | str, unit: str) -> str:
     key = _v4011_norm_key(unit)
     forms = _V4011_UNIT_FORMS.get(key)
@@ -2063,6 +2260,9 @@ def _v4011_plural(value: int | str, unit: str) -> str:
 
 
 def _v4011_abbrev(unit: str) -> str:
+    rate_unit = _v52904_rate_unit_abbrev(unit)
+    if rate_unit:
+        return rate_unit
     key = _v4011_norm_key(unit)
     return _V4011_UNIT_ABBREVIATIONS.get(key, str(unit or '').strip())
 
@@ -2074,6 +2274,8 @@ def _v4012_is_counted_piece_unit(unit: str, info: dict[str, str | bool] | None =
         key = _v4011_unit_from_phrase(phrase) if phrase else ''
     if not key:
         return False
+    if _v52904_rate_unit_abbrev(key):
+        return False
     if key in _V4011_MEASURE_WORDS or key in _V4012_NON_PIECE_COUNT_UNITS:
         return False
     # Anything asked as «сколько <object noun phrase> ...» and not recognized as
@@ -2083,7 +2285,11 @@ def _v4012_is_counted_piece_unit(unit: str, info: dict[str, str | bool] | None =
 
 
 def _v4012_paren_unit(unit: str, info: dict[str, str | bool] | None = None) -> str:
-    key = _v4011_norm_key(unit or str((info or {}).get('unit') or ''))
+    raw_unit = unit or str((info or {}).get('unit') or '')
+    rate_unit = _v52904_rate_unit_abbrev(raw_unit)
+    if rate_unit:
+        return rate_unit
+    key = _v4011_norm_key(raw_unit)
     phrase_for_unit = _v4011_norm_key(str((info or {}).get('unitPhrase') or (info or {}).get('tail') or ''))
     original_for_unit = str((info or {}).get('originalText') or '').lower().replace('ё', 'е')
     if key in {'км/день', 'км/д.', 'км/д', 'километров в день', 'километра в день'} or 'км/д' in key:
@@ -3763,7 +3969,7 @@ def _v4011_question_info(original_text: str, fallback_unit: str = '') -> dict[st
         verb = _v4011_clean_phrase(m.group(1))
         rest = _v4011_clean_phrase(m.group(2))
         unit = _v4011_norm_key(fallback_unit) or _v4011_unit_from_phrase(rest, fallback_unit)
-        info.update({'unit': unit, 'unitPhrase': unit, 'tail': rest, 'verb': verb, 'rest': rest, 'isMeasure': bool(unit and (unit in _V4011_UNIT_ABBREVIATIONS or unit in _V4011_UNIT_FORMS))})
+        info.update({'unit': unit, 'unitPhrase': unit, 'tail': rest, 'verb': verb, 'rest': rest, 'isMeasure': bool(unit and (unit in _V4011_UNIT_ABBREVIATIONS or unit in _V4011_UNIT_FORMS or _v52904_rate_unit_abbrev(unit)))})
         return info
     m = re.search(r'с\s+какой\s+частотой(?:\s+в\s+минуту)?\s+(.+)$', low)
     if m:
@@ -4376,7 +4582,7 @@ def _v4011_try_build_simple_solution(original_text: str, payload: dict[str, Any]
     answer_line = _v4011_answer_line(result_text)
     if not answer_unit:
         # Pull unit from a visible answer like "3 литров".
-        m_unit = re.search(r'(?<!\d)-?\d+\s+([а-яa-zё.]+)', answer_line, flags=re.IGNORECASE)
+        m_unit = re.search(r'(?<!\d)-?\d+\s+([а-яa-zё./-]+)', answer_line, flags=re.IGNORECASE)
         if m_unit:
             answer_unit = m_unit.group(1)
     original_unit = ''
@@ -4389,7 +4595,7 @@ def _v4011_try_build_simple_solution(original_text: str, payload: dict[str, Any]
         question_tail = _v4011_question_info(original_text, '').get('unit')
         if question_tail:
             original_unit = str(question_tail)
-    if original_unit and (not answer_unit or _v4011_norm_key(answer_unit) not in _V4011_UNIT_FORMS and _v4011_norm_key(answer_unit) not in _V4011_UNIT_ABBREVIATIONS):
+    if original_unit and (not answer_unit or _v4011_norm_key(answer_unit) not in _V4011_UNIT_FORMS and _v4011_norm_key(answer_unit) not in _V4011_UNIT_ABBREVIATIONS and not _v52904_rate_unit_abbrev(answer_unit)):
         answer_unit = original_unit
     if not answer_unit and original_unit:
         # Last resort for guarded local fallbacks: infer a visible unit from the
@@ -11854,37 +12060,58 @@ def _v500_extract_measure_quantity_payload_args(original_text: str, info: dict[s
 
 def _v500_step_unit(answer_unit: str) -> str:
     unit = str(answer_unit or '').strip()
-    if unit in {'км/ч', 'м/с'}:
-        return unit
+    rate_unit = _v52904_rate_unit_abbrev(unit)
+    if rate_unit:
+        return rate_unit
     mapped = _v4012_paren_unit(unit, {'unit': unit}) if unit else ''
     return mapped or unit or 'шт.'
 
 def _v500_extract_speed_time_distance_payload_args(original_text: str, info: dict[str, str | bool]) -> tuple[str, int, int, int, str, str] | None:
-    """Return (op, a, b, result, unit, explanation) for speed/time/distance tasks."""
+    """Return (op, a, b, result, unit, explanation) for speed/time/distance tasks.
+
+    V529.04 derives the compound speed unit from the actual distance and time
+    units.  It no longer assumes that every metre task is in m/s or every
+    kilometre task is in km/h.
+    """
     cond = _v500_condition_text(original_text)
     q = _v500_last_question_sentence(original_text)
     low = _v500_norm(cond)
     qlow = _v500_norm(q)
-    speed_m = re.search(r'(?<!\d)(\d+)(?!\d)\s*(км/ч|км\s+в\s+час|м/с|м\s+в\s+сек)', low, flags=re.IGNORECASE)
-    dist_m = re.search(r'(?<!\d)(\d+)(?!\d)\s*(км|километр(?:ов|а)?|м|метр(?:ов|а)?)\b', low, flags=re.IGNORECASE)
-    # Time is often stated in the question: «... за 3 часа?».  Search the
-    # question first so «60 км/ч» is not accidentally treated as 60 hours.
-    time_m = re.search(r'(?<!\d)(\d+)(?!\d)\s*(ч|час(?:ов|а)?|мин(?:\.|ут(?:ы|а)?)?|сек(?:\.|унд(?:ы|а)?)?)\b', qlow, flags=re.IGNORECASE)
+
+    distance_pattern = r'(?:км|километр(?:ов|а|ы)?|м|метр(?:ов|а|ы)?|дм|дециметр(?:ов|а|ы)?|см|сантиметр(?:ов|а|ы)?|мм|миллиметр(?:ов|а|ы)?)'
+    time_pattern = r'(?:ч|час(?:ов|а)?|мин(?:\.|ут(?:ы|а|у)?)?|с|сек(?:\.|унд(?:ы|а|у)?)?|д(?:\.|н\.?)?|день|дня|дней|сут(?:\.|ки|ок)?|нед(?:\.|еля|елю|ели|ель)?|мес(?:\.|яц|яца|яцев)?|год|года|лет)'
+    speed_pattern = rf'{distance_pattern}\s*(?:/|\s+в\s+)\s*{time_pattern}'
+
+    speed_m = re.search(rf'(?<!\d)(\d+)(?!\d)\s*({speed_pattern})(?=\s|[.,;:!?]|$)', low, flags=re.IGNORECASE)
+    speed_span = speed_m.span() if speed_m else None
+
+    distance_matches = list(re.finditer(rf'(?<!\d)(\d+)(?!\d)\s*({distance_pattern})(?=\s|[.,;:!?]|$)', low, flags=re.IGNORECASE))
+    dist_m = next((m for m in distance_matches if not speed_span or not (m.start() >= speed_span[0] and m.end() <= speed_span[1])), None)
+
+    # Time is often stated in the question: «... за 3 часа?». Search the
+    # question first; then use a condition time that is not part of a speed unit.
+    time_m = re.search(rf'(?<!\d)(\d+)(?!\d)\s*({time_pattern})(?=\s|[.,;:!?]|$)', qlow, flags=re.IGNORECASE)
     if not time_m:
-        time_m = re.search(r'(?<!\d)(\d+)(?!\d)\s*(?:ч|час(?:ов|а)?|мин(?:\.|ут(?:ы|а)?)?|сек(?:\.|унд(?:ы|а)?)?)\b', low, flags=re.IGNORECASE)
+        time_matches = list(re.finditer(rf'(?<!\d)(\d+)(?!\d)\s*({time_pattern})(?=\s|[.,;:!?]|$)', low, flags=re.IGNORECASE))
+        time_m = next((m for m in time_matches if not speed_span or not (m.start() >= speed_span[0] and m.end() <= speed_span[1])), None)
+
     speed = int(speed_m.group(1)) if speed_m else None
     distance = int(dist_m.group(1)) if dist_m else None
     time = int(time_m.group(1)) if time_m else None
-    if speed and time and any(w in qlow for w in ('какое расстояние', 'сколько километров', 'сколько км', 'какой путь', 'сколько метров')):
-        unit = 'км' if 'км' in speed_m.group(2).lower() else 'м'
-        return 'mul', speed, time, speed * time, unit, 'путь'
-    if distance and time and any(w in qlow for w in ('какая скорость', 'скорость')):
-        if time and distance % time == 0:
-            unit = 'км/ч' if 'км' in dist_m.group(2).lower() else 'м/с'
-            return 'div', distance, time, distance // time, unit, 'скорость'
-    if distance and speed and any(w in qlow for w in ('сколько времени', 'за сколько', 'время')):
-        if speed and distance % speed == 0:
-            return 'div', distance, speed, distance // speed, 'ч', 'время'
+    speed_parts = _v52904_rate_unit_parts(speed_m.group(2)) if speed_m else None
+    distance_unit = _V52904_DISTANCE_UNIT_ABBREVIATIONS.get(re.sub(r'[.\s]+', '', dist_m.group(2).lower().replace('ё', 'е'))) if dist_m else None
+    time_unit = _V52904_TIME_UNIT_ABBREVIATIONS.get(re.sub(r'[.\s]+', '', time_m.group(2).lower().replace('ё', 'е'))) if time_m else None
+
+    if speed and time and any(w in qlow for w in ('какое расстояние', 'сколько километров', 'сколько км', 'какой путь', 'сколько метров', 'сколько дециметров', 'сколько сантиметров', 'сколько миллиметров')):
+        numerator_unit = speed_parts[0] if speed_parts else None
+        if numerator_unit:
+            return 'mul', speed, time, speed * time, numerator_unit, 'путь'
+    if distance and time and _v52904_is_speed_question(original_text):
+        if time and distance % time == 0 and distance_unit and time_unit:
+            return 'div', distance, time, distance // time, f'{distance_unit}/{time_unit}', 'скорость'
+    if distance and speed and any(w in qlow for w in ('сколько времени', 'за сколько', 'сколько часов', 'сколько минут', 'сколько секунд', 'как долго', 'время')):
+        if speed and distance % speed == 0 and speed_parts:
+            return 'div', distance, speed, distance // speed, speed_parts[1], 'время'
     return None
 
 
