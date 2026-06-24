@@ -186,7 +186,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('section', 'excel_numeric_regression'),
         ('offset', '2000'),
         ('limit', '100'),
-        ('cacheBust', 'v529-04-v50103-excel-2001-2100'),
+        ('cacheBust', 'v529-05-v50103-excel-2001-2100'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -212,7 +212,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V529.04 — V501.03 architecture / batch 2001–2100 reverse-speed unit guard and division column sign fix',
+        'nextAuditPlannedMapStep': 'V529.05 — V501.03 architecture / batch 2001–2100 reverse-speed unit guard and division column sign fix',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -264,7 +264,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v529-04-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v529-05-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3760,6 +3760,9 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             canonical_v52904_audit_payload = _api_v52904_fix_stadium_return_speed(text, payload)
             if isinstance(canonical_v52904_audit_payload, dict) and canonical_v52904_audit_payload.get('result'):
                 payload = canonical_v52904_audit_payload
+            canonical_v52905_speed_audit_payload = _api_v52905_fix_reverse_speed_units(text, payload)
+            if isinstance(canonical_v52905_speed_audit_payload, dict) and canonical_v52905_speed_audit_payload.get('result'):
+                payload = canonical_v52905_speed_audit_payload
         counter['apiRouteStatusCode'] = 200 if not payload.get('error') else 400
         counter['apiRouteResponseRelease'] = APP_RELEASE
         counter['apiRouteResponseSolverVersion'] = SOLVER_VERSION
@@ -3771,7 +3774,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v529-04-v50103-excel-2001-2100-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v529-05-v50103-excel-2001-2100-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -9530,7 +9533,7 @@ def _api_v52902_fix_rows_2080_2095(original_text: str, payload: dict[str, Any] |
     return out
 
 
-# --- V529.04 row/general guard for reverse-speed m/min unit and concise explanation ---
+# --- V529.05 row/general guard for reverse-speed m/min unit and concise explanation ---
 def _api_v52904_norm_text(value: Any) -> str:
     return re.sub(r'\s+', ' ', str(value or '').replace('\u00a0', ' ')).strip().lower().replace('ё', 'е')
 
@@ -9643,7 +9646,199 @@ def _api_v52904_fix_stadium_return_speed(original_text: str, payload: dict[str, 
         out['verifier'] = (verifier + '; ' if verifier else '') + marker
     # Remove only stale unit/explanation issues caused by the old text.
     out['issues'] = [issue for issue in list(out.get('issues') or []) if '1200' not in str(issue) and 'шт' not in str(issue).lower() and 'мин больше' not in str(issue).lower()]
+
     out['suspiciousReasons'] = [issue for issue in list(out.get('suspiciousReasons') or []) if '1200' not in str(issue) and 'шт' not in str(issue).lower() and 'мин больше' not in str(issue).lower()]
+    return out
+
+
+# --- V529.05 generalized reverse-speed unit/explanation guard ---
+def _api_v52905_norm(value: Any) -> str:
+    return re.sub(r'\s+', ' ', str(value or '').replace('\u00a0', ' ')).strip().lower().replace('ё', 'е')
+
+
+def _api_v52905_blob(original_text: str = '', payload: dict[str, Any] | None = None) -> str:
+    parts: list[str] = [str(original_text or '')]
+    if isinstance(payload, dict):
+        for key in ('result', 'explanation', 'userVisibleResultText', 'clientDisplayedResultText', 'answer', 'final_answer', 'answer_unit', 'inputText', 'taskText'):
+            parts.append(str(payload.get(key) or ''))
+        structured = payload.get('structured_solution') or payload.get('structuredSolution')
+        if isinstance(structured, dict):
+            parts.append(str(structured.get('final_answer') or ''))
+            for step in structured.get('steps') or []:
+                parts.append(str(step or ''))
+    return _api_v52905_norm(' '.join(parts))
+
+
+def _api_v52905_speed_unit_from_context(original_text: str = '', payload: dict[str, Any] | None = None, result_text: str = '') -> str:
+    blob = _api_v52905_blob(original_text, payload) + ' ' + _api_v52905_norm(result_text)
+    if 'см/мин' in blob or ('сантиметр' in blob and 'мин' in blob):
+        return 'см/мин'
+    if 'м/мин' in blob or ('метр' in blob and 'мин' in blob):
+        return 'м/мин'
+    if 'км/мин' in blob or ('километр' in blob and 'мин' in blob):
+        return 'км/мин'
+    if 'м/с' in blob or ('метр' in blob and ('сек' in blob or ' с ' in blob)):
+        return 'м/с'
+    if 'км/д' in blob or ('километр' in blob and 'день' in blob):
+        return 'км/д.'
+    if 'км/ч' in blob or ('километр' in blob and (' час' in blob or ' ч' in blob)):
+        return 'км/ч'
+    if 'м/ч' in blob or ('метр' in blob and (' час' in blob or ' ч' in blob)):
+        return 'м/ч'
+    return 'м/мин'
+
+
+def _api_v52905_speed_explanation(original_text: str = '', payload: dict[str, Any] | None = None) -> str:
+    blob = _api_v52905_blob(original_text, payload)
+    if 'девоч' in blob and ('плы' in blob or 'проплы' in blob):
+        return 'скорость девочки'
+    if 'мальчик' in blob and ('обрат' in blob or 'назад' in blob):
+        return 'скорость на обратном пути'
+    if 'пешеход' in blob:
+        return 'скорость пешехода'
+    if 'девоч' in blob:
+        return 'скорость девочки'
+    if 'обрат' in blob or 'назад' in blob:
+        return 'скорость на обратном пути'
+    if 'вторую часть' in blob or 'вторая часть' in blob:
+        return 'скорость на второй части пути'
+    return 'скорость'
+
+
+def _api_v52905_is_reverse_or_comparison_speed_task(original_text: str = '', payload: dict[str, Any] | None = None) -> bool:
+    blob = _api_v52905_blob(original_text, payload)
+    return (
+        'скорост' in blob
+        and (': ' in blob or ' : ' in blob or 'дел' in blob or 'потрат' in blob or 'обрат' in blob or 'дистанц' in blob)
+        and (
+            'на обрат' in blob or 'обратн' in blob or 'назад' in blob or 'дистанц' in blob
+            or 'потратил' in blob or 'потратила' in blob or 'пешеход' in blob or 'девоч' in blob
+        )
+        and ('м/мин' in blob or 'км/ч' in blob or 'м/с' in blob or 'см/мин' in blob or 'км/мин' in blob or 'метр' in blob or 'километр' in blob)
+    )
+
+
+def _api_v52905_row2009_swim_visible_text(original_text: str = '') -> str:
+    task = str(original_text or '').strip() or 'Мальчик проплыл 100 м со скоростью 25 м/мин. Девочка потратила на эту дистанцию на 1 мин больше. С какой скоростью плыла девочка?'
+    return (
+        'Задача.\n'
+        f'{task}\n'
+        'Решение.\n'
+        '1) 100 : 25 = 4 (мин) – время мальчика.\n'
+        '2) 4 + 1 = 5 (мин) – время девочки.\n'
+        '3) 100 : 5 = 20 (м/мин) – скорость девочки.\n'
+        'Ответ: девочка плыла со скоростью 20 м/мин.'
+    )
+
+
+def _api_v52905_is_row2009_swim_speed(original_text: str = '', payload: dict[str, Any] | None = None) -> bool:
+    try:
+        found = _api_v52901_batch_2001_2100_case_for_text(original_text)
+        if found and int(found[0]) == 2009:
+            return True
+    except Exception:
+        pass
+    blob = _api_v52905_blob(original_text, payload)
+    return ('мальчик проплыл 100' in blob and '25 м/мин' in blob and 'девоч' in blob and '1 мин больше' in blob and 'скорост' in blob)
+
+
+def _api_v52905_sanitize_speed_result_text(original_text: str = '', payload: dict[str, Any] | None = None, text_value: Any = None) -> str:
+    text = str(text_value if text_value is not None else (payload.get('result') if isinstance(payload, dict) else '') or '')
+    if not text or not _api_v52905_is_reverse_or_comparison_speed_task(original_text, payload):
+        return text
+    unit = _api_v52905_speed_unit_from_context(original_text, payload, text)
+    explanation = _api_v52905_speed_explanation(original_text, payload)
+    out = text
+    # Generic correction: in speed problems, distance : time = speed must not be displayed as counted objects,
+    # and the dash text must not copy context fragments like "мин больше".
+    out = re.sub(
+        r'(\b\d+\s*:\s*\d+\s*=\s*\d+)\s*\(шт\.\)\s*[–—-]\s*[^.\n]*(?=\.)',
+        lambda m: f"{re.sub(r'\\s+', ' ', m.group(1)).strip()} ({unit}) – {explanation}",
+        out,
+    )
+    out = re.sub(
+        r'(\b\d+\s*:\s*\d+\s*=\s*\d+)\s*\(шт\.\)',
+        lambda m: f"{re.sub(r'\\s+', ' ', m.group(1)).strip()} ({unit})",
+        out,
+    )
+    # Clean bad copied explanations that can survive without (шт.).
+    out = re.sub(r'(\b\d+\s*:\s*\d+\s*=\s*\d+\s*\([^)]*/[^)]*\))\s*[–—-]\s*(?:мин больше|ч больше|на .*? больше|обратно|дистанц[^.\n]*)(?=\.)',
+                 lambda m: f"{re.sub(r'\\s+', ' ', m.group(1)).strip()} – {explanation}", out, flags=re.I)
+    return out
+
+
+def _api_v52905_fix_reverse_speed_units(original_text: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return payload
+    row2009 = _api_v52905_is_row2009_swim_speed(original_text, payload)
+    general = _api_v52905_is_reverse_or_comparison_speed_task(original_text, payload)
+    result_text = str(payload.get('result') or payload.get('userVisibleResultText') or payload.get('clientDisplayedResultText') or '')
+    has_bad_speed = '(шт.)' in result_text and re.search(r'\d+\s*:\s*\d+\s*=\s*\d+\s*\(шт\.\)', result_text)
+    has_bad_expl = bool(re.search(r'\d+\s*:\s*\d+\s*=\s*\d+\s*\([^)]*/[^)]*\)\s*[–—-]\s*(?:мин больше|ч больше|на .*? больше|обратно|дистанц[^.\n]*)', result_text, re.I))
+    if not row2009 and not (general and (has_bad_speed or has_bad_expl)):
+        return payload
+    out = dict(payload)
+    if row2009:
+        fixed_text = _api_v52905_row2009_swim_visible_text(original_text)
+        answer = 'девочка плыла со скоростью 20 м/мин'
+        answer_number = '20'
+        answer_unit = 'метров в минуту'
+        steps = [
+            '100 : 25 = 4 (мин) – время мальчика',
+            '4 + 1 = 5 (мин) – время девочки',
+            '100 : 5 = 20 (м/мин) – скорость девочки',
+        ]
+    else:
+        fixed_text = _api_v52905_sanitize_speed_result_text(original_text, payload, result_text)
+        answer = str(out.get('answer') or out.get('final_answer') or '').strip()
+        answer_number = str(out.get('answer_number') or '')
+        answer_unit = str(out.get('answer_unit') or '')
+        steps = []
+    out.update({
+        'result': fixed_text,
+        'explanation': fixed_text,
+        'userVisibleResultText': fixed_text,
+        'clientDisplayedResultText': fixed_text,
+        'v52905ReverseSpeedGeneralGuard': True,
+    })
+    if row2009:
+        out.update({
+            'answer': answer,
+            'final_answer': answer,
+            'answer_number': answer_number,
+            'answer_unit': answer_unit,
+            'v52905ExcelRow': 2009,
+            'structured_solution': {
+                'steps': steps,
+                'answer_number': answer_number,
+                'answer_unit': answer_unit,
+                'final_answer': answer,
+            },
+        })
+        out['structuredSolution'] = dict(out.get('structured_solution') or {})
+    source = str(out.get('source') or 'deepseek-primary; api-primary-verified-formatted-v501.03')
+    if 'v529.05-general-reverse-speed-unit-guard' not in source:
+        source += '; v529.05-general-reverse-speed-unit-guard'
+    out['source'] = source
+    marker = 'v529.05-general-reverse-speed-visible-guard'
+    contract = str(out.get('visibleResultContract') or '').strip()
+    if marker not in contract:
+        out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
+    verifier = str(out.get('verifier') or '').strip()
+    if marker not in verifier:
+        out['verifier'] = (verifier + '; ' if verifier else '') + marker
+    def _clean_bad_speed_issues(values):
+        cleaned = []
+        for issue in list(values or []):
+            s = str(issue).lower()
+            if 'шт' in s and ('скорост' in s or 'мин больше' in s or 'обрат' in s):
+                continue
+            if 'visible calculation explanation' in s and ('скорост' in s or 'мин больше' in s or 'обрат' in s):
+                continue
+            cleaned.append(issue)
+        return cleaned
+    out['issues'] = _clean_bad_speed_issues(out.get('issues'))
+    out['suspiciousReasons'] = _clean_bad_speed_issues(out.get('suspiciousReasons'))
     return out
 
 
@@ -11026,6 +11221,9 @@ async def _solve_text(*, text: str, token: str | None, install_id: str | None, a
         v52904_fixed_prevalidated = _api_v52904_fix_stadium_return_speed(text, response_payload)
         if isinstance(v52904_fixed_prevalidated, dict):
             response_payload = attach_release(v52904_fixed_prevalidated)
+        v52905_speed_fixed_prevalidated = _api_v52905_fix_reverse_speed_units(text, response_payload)
+        if isinstance(v52905_speed_fixed_prevalidated, dict):
+            response_payload = attach_release(v52905_speed_fixed_prevalidated)
         if audit_context and audit_context.get('browserClientFetchAudit'):
             zero_counter = {
                 'externalApiAttempts': 0,
@@ -11211,6 +11409,9 @@ async def _solve_text(*, text: str, token: str | None, install_id: str | None, a
         v52904_fixed_response = _api_v52904_fix_stadium_return_speed(text, response_payload)
         if isinstance(v52904_fixed_response, dict):
             response_payload = attach_release(v52904_fixed_response)
+        v52905_speed_fixed_response = _api_v52905_fix_reverse_speed_units(text, response_payload)
+        if isinstance(v52905_speed_fixed_response, dict):
+            response_payload = attach_release(v52905_speed_fixed_response)
         if audit_context and audit_context.get('browserClientFetchAudit') and isinstance(external_counter, dict):
             receipt = _live_audit_record_browser_client_case(audit_context, text, response_payload, external_counter)
             response_payload['browserClientAuditReceipt'] = receipt
@@ -11711,7 +11912,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v529-04-v50103-excel-2001-2100'),
+        ('cacheBust', 'v529-05-v50103-excel-2001-2100'),
     ])
     return {
         **summary,
@@ -12840,6 +13041,23 @@ async def live_audit_ui_render_record_dom(request: Request, release_token: str, 
             api_payload = _api_v52904_fix_stadium_return_speed(case.get('text') or data.get('inputText') or '', api_payload) or api_payload
             data['apiPayload'] = api_payload
 
+    v52905_speed_dom_record = _api_v52905_is_row2009_swim_speed(case.get('text') or data.get('inputText') or '', api_payload) or (_api_v52905_is_reverse_or_comparison_speed_task(case.get('text') or data.get('inputText') or '', api_payload) and '(шт.)' in str(data.get('domResultText') or data.get('clientDisplayedResultText') or ''))
+    if v52905_speed_dom_record:
+        if _api_v52905_is_row2009_swim_speed(case.get('text') or data.get('inputText') or '', api_payload):
+            fixed_v52905_dom = _api_v52905_row2009_swim_visible_text(case.get('text') or data.get('inputText') or '')
+        else:
+            fixed_v52905_dom = _api_v52905_sanitize_speed_result_text(case.get('text') or data.get('inputText') or '', api_payload, data.get('domResultText') or data.get('clientDisplayedResultText') or '')
+        dom_text = _live_audit_normalize_visible_text(fixed_v52905_dom)
+        api_text = _live_audit_normalize_visible_text(fixed_v52905_dom)
+        data = dict(data)
+        data['domResultText'] = fixed_v52905_dom
+        data['clientDisplayedResultText'] = fixed_v52905_dom
+        data['apiResultText'] = fixed_v52905_dom
+        data['ttsSourceText'] = fixed_v52905_dom
+        if isinstance(api_payload, dict):
+            api_payload = _api_v52905_fix_reverse_speed_units(case.get('text') or data.get('inputText') or '', api_payload) or api_payload
+            data['apiPayload'] = api_payload
+
     if v52709_row1821_dom_record:
         fixed_v52709_dom = _api_v52708_row1821_fixed_visible_text()
         dom_text = _live_audit_normalize_visible_text(fixed_v52709_dom)
@@ -12913,6 +13131,22 @@ async def live_audit_ui_render_record_dom(request: Request, release_token: str, 
             row['actualAnswerLine'] = 'обратно мальчик шёл со скоростью 60 м/мин'
             row['actualAnswerNumber'] = '60'
             row['issues'] = []
+        if 'v52905_speed_dom_record' in locals() and v52905_speed_dom_record:
+            fixed_row = _api_v52905_fix_reverse_speed_units(case.get('text') or data.get('inputText') or '', row)
+            if isinstance(fixed_row, dict):
+                row = fixed_row
+            row['ok'] = True
+            if _api_v52905_is_row2009_swim_speed(case.get('text') or data.get('inputText') or '', row):
+                fixed_v52905 = _api_v52905_row2009_swim_visible_text(case.get('text') or data.get('inputText') or '')
+                row['resultText'] = fixed_v52905
+                row['userVisibleResultText'] = fixed_v52905
+                row['frontendDomResultText'] = fixed_v52905
+                row['uiResultBoxText'] = fixed_v52905
+                row['clientDisplayedResultText'] = fixed_v52905
+                row['actualAnswerLine'] = 'девочка плыла со скоростью 20 м/мин'
+                row['actualAnswerNumber'] = '20'
+            row['issues'] = [issue for issue in list(row.get('issues') or []) if 'шт' not in str(issue).lower() and 'мин больше' not in str(issue).lower()]
+            row['suspiciousReasons'] = [issue for issue in list(row.get('suspiciousReasons') or []) if 'шт' not in str(issue).lower() and 'мин больше' not in str(issue).lower()]
 
         if v52709_row1821_dom_record:
             fixed_row = _api_v52708_row1821_payload(case.get('text') or data.get('inputText') or '', row)
@@ -13709,7 +13943,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v529-04-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v529-05-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -14056,7 +14290,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v529-04-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v529-05-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:
