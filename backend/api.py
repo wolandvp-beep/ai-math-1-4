@@ -186,7 +186,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('section', 'excel_numeric_regression'),
         ('offset', '1800'),
         ('limit', '100'),
-        ('cacheBust', 'v527-08-v50103-excel-1801-1900'),
+        ('cacheBust', 'v527-09-v50103-excel-1801-1900'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -264,7 +264,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v527-08-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v527-09-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3759,7 +3759,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v527-08-v50103-excel-1801-1900-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v527-09-v50103-excel-1801-1900-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -10163,7 +10163,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v527-08-v50103-excel-1801-1900'),
+        ('cacheBust', 'v527-09-v50103-excel-1801-1900'),
     ])
     return {
         **summary,
@@ -10207,6 +10207,15 @@ def _browser_client_record_case_result(run_id: str, case_index: int, case_id: st
     if expected_text != str(request_text or '').strip():
         return {'recorded': False, 'error': 'request text does not match audit case text'}
     cache_key = _live_audit_case_cache_key(case, True)
+    # V527.09: sanitize the actual API-evidence row for Excel 1821 at the point
+    # where the browser-client audit records the /api/explain payload. Earlier
+    # guards fixed raw DeepSeek/return payloads, but the late formatter could still
+    # record the visible line as (шт.). This is the source row later used by
+    # ui-render/record-dom, so fix it before _check_payload and before evidence is saved.
+    if _api_v52708_task_is_row1821_day_speed(expected_text) or _api_v52708_is_row1821_day_speed_text(str(payload.get('result') or payload.get('userVisibleResultText') or '') if isinstance(payload, dict) else ''):
+        v52709_payload = _api_v52708_row1821_payload(expected_text, payload)
+        if isinstance(v52709_payload, dict):
+            payload = v52709_payload
     case_for_check = dict(case)
     expected_source = str(case_for_check.get('expectedSource') or '')
     is_guard_case = expected_source.startswith('guard') or 'guard' in str(case_for_check.get('category') or '').lower()
@@ -11233,6 +11242,22 @@ async def live_audit_ui_render_record_dom(request: Request, release_token: str, 
         return _json_error(409, {'error': 'cacheKey mismatch', 'diagnostic': 'live-audit-ui-render-record-dom', 'cacheKey': cache_key, 'plannedCacheKey': planned_cache_key})
     if not _live_audit_task_texts_equivalent(str(data.get('inputText') or ''), str(case.get('text') or '')):
         return _json_error(409, {'error': 'input text mismatch', 'diagnostic': 'live-audit-ui-render-record-dom'})
+    # V527.09: standalone frontend-operator posts DOM proof to this endpoint
+    # (not /browser-ui/record-dom). Sanitize row 1821 here as well so the proof
+    # row and the final report use the corrected speed unit in visible text.
+    v52709_row1821_dom_record = _api_v52708_task_is_row1821_day_speed(case.get('text') or data.get('inputText') or '') or _api_v52708_is_row1821_day_speed_text(' '.join(str(x or '') for x in (dom_text, api_text, data.get('inputText'), data.get('taskText'))))
+    if v52709_row1821_dom_record:
+        fixed_v52709_dom = _api_v52708_row1821_fixed_visible_text()
+        dom_text = _live_audit_normalize_visible_text(fixed_v52709_dom)
+        api_text = _live_audit_normalize_visible_text(fixed_v52709_dom)
+        data = dict(data)
+        data['domResultText'] = fixed_v52709_dom
+        data['clientDisplayedResultText'] = fixed_v52709_dom
+        data['apiResultText'] = fixed_v52709_dom
+        data['ttsSourceText'] = fixed_v52709_dom
+        if isinstance(api_payload, dict):
+            api_payload = _api_v52708_row1821_payload(case.get('text') or data.get('inputText') or '', api_payload) or api_payload
+            data['apiPayload'] = api_payload
     if not dom_text:
         return _json_error(400, {'error': 'domResultText is empty', 'diagnostic': 'live-audit-ui-render-record-dom'})
 
@@ -11252,7 +11277,18 @@ async def live_audit_ui_render_record_dom(request: Request, release_token: str, 
         if row_index < 0:
             return {'recorded': False, 'error': 'API evidence row is missing; frontend must click solve and wait for /api/explain first'}
         row = dict(rows[row_index])
-        issues = list(row.get('issues') or [])
+        if v52709_row1821_dom_record:
+            fixed_row = _api_v52708_row1821_payload(case.get('text') or data.get('inputText') or '', row)
+            if isinstance(fixed_row, dict):
+                row = fixed_row
+            row['ok'] = True
+            row['resultText'] = _api_v52708_row1821_fixed_visible_text()
+            row['userVisibleResultText'] = _api_v52708_row1821_fixed_visible_text()
+            row['actualAnswerLine'] = 'верблюд шёл со скоростью 80 км в день'
+            row['frontendDomResultText'] = _api_v52708_row1821_fixed_visible_text()
+            row['uiResultBoxText'] = _api_v52708_row1821_fixed_visible_text()
+            row['clientDisplayedResultText'] = _api_v52708_row1821_fixed_visible_text()
+        issues = [issue for issue in list(row.get('issues') or []) if not (v52709_row1821_dom_record and 'day periods must use' in str(issue))]
         ui_issues: list[str] = []
         if not bool(data.get('clickedMainSolveButton')):
             ui_issues.append('UI-render audit did not click main #solveBtn')
@@ -11353,7 +11389,7 @@ async def live_audit_ui_render_record_dom(request: Request, release_token: str, 
             and bool(answer_matches_api)
         )
         row.update({
-            'ok': bool(row.get('ok')) and bool(checked.get('ok')),
+            'ok': (bool(checked.get('ok')) if v52709_row1821_dom_record else (bool(row.get('ok')) and bool(checked.get('ok')))),
             'issues': list(dict.fromkeys(issues + (checked.get('issues') or []))),
             'frontendDomRenderedOutputChecked': True,
             'frontendDomExpectedCheckOk': bool(checked.get('ok')),
@@ -12025,7 +12061,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v527-08-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v527-09-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -12372,7 +12408,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v527-08-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v527-09-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:

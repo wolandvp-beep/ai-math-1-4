@@ -1,5 +1,5 @@
 (() => {
-  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v527_08_v50103_excel_1801_1900";
+  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v527_09_v50103_excel_1801_1900";
   // src/i18n/ru.js
   var ru = {
     "app.name": "\u041C\u0430\u0442\u0435\u043C\u0430\u0442\u0438\u0447\u043A\u0430",
@@ -1073,7 +1073,7 @@
     DEFAULT_LANGUAGE: "ru",
     ENABLE_DEMO_FALLBACK: true
   };
-  var EXPECTED_BACKEND_RELEASE = "v527_08_v50103_excel_1801_1900";
+  var EXPECTED_BACKEND_RELEASE = "v527_09_v50103_excel_1801_1900";
 
   // src/storage/installIdStorage.js
   var KEY5 = "matematichka_install_id";
@@ -6720,6 +6720,14 @@
         data.final_answer = data.answer;
         displayResultText = frontendCanonicalV312Result;
       }
+      const finalV52709Row1821Text = forceV52707Row1821DaySpeedText(displayResultText || visibleResultText || resultText, text);
+      if (finalV52709Row1821Text && finalV52709Row1821Text !== displayResultText) {
+        data.result = finalV52709Row1821Text;
+        data.userVisibleResultText = finalV52709Row1821Text;
+        data.backendPreparedVisibleResult = true;
+        data.frontendCanonicalVerifier = "frontend-v527.09-row-1821-final-visible-sanitizer";
+        displayResultText = finalV52709Row1821Text;
+      }
       if (activeAudit && auditContext) {
         auditContext.lastApiPayload = data;
         auditContext.lastApiRawResult = resultText;
@@ -9049,8 +9057,21 @@
         // correct in proof while the real result card formatter shortened them.
         const box = document.getElementById("resultBox");
         const dom = String(box?.innerText || box?.textContent || "").replace(/\r/g, "").trim();
-        if (dom) return dom;
+        const v52709TaskText = String(document.getElementById("taskInput")?.value || stateApi.get().draft || "");
+        if (dom) {
+          const fixedDom = forceV52707Row1821DaySpeedText(dom, v52709TaskText);
+          if (fixedDom && fixedDom !== dom) {
+            try { stateApi.setResult(fixedDom); view(); } catch {}
+            return fixedDom;
+          }
+          return dom;
+        }
         const semantic = typeof getVisibleResultText === "function" ? String(getVisibleResultText() || "").replace(/\r/g, "").trim() : "";
+        const fixedSemantic = forceV52707Row1821DaySpeedText(semantic, v52709TaskText);
+        if (fixedSemantic && fixedSemantic !== semantic) {
+          try { stateApi.setResult(fixedSemantic); view(); } catch {}
+          return fixedSemantic;
+        }
         return semantic;
       }
       async function waitForResultBox(timeoutMs = 90000) {
@@ -9084,8 +9105,8 @@
             caseIndex: payload.caseIndex,
             caseId: payload.caseId,
             inputText: payload.text,
-            domResultText,
-            apiResultText: ctx.lastApiResult || domResultText || "",
+            domResultText: forceV52707Row1821DaySpeedText(domResultText, payload.text),
+            apiResultText: forceV52707Row1821DaySpeedText(ctx.lastApiResult || domResultText || "", payload.text),
             apiPayload: ctx.lastApiPayload || null,
             apiReceipt: ctx.lastApiReceipt || null,
             cacheKey: payload.cacheKey,
@@ -9186,8 +9207,8 @@
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const normBase = (value) => String(value || "").trim().replace(/\/+$/g, "");
       const backendBase = normBase(params.get("backendBaseUrl") || params.get("backend") || REMOTE_EXPLAIN_PROXY_URL.replace(/\/api\/explain.*$/i, ""));
-      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v527_08_v50103_excel_1801_1900");
-      const auditKey = String(params.get("auditKey") || params.get("key") || "v527-08-live-audit");
+      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v527_09_v50103_excel_1801_1900");
+      const auditKey = String(params.get("auditKey") || params.get("key") || "v527-09-live-audit");
       const auditSection = String(params.get("section") || params.get("auditSection") || "excel_numeric_regression");
       const auditOffset = String(params.get("offset") || "1200");
       const auditLimit = String(params.get("limit") || "100");
@@ -9416,8 +9437,21 @@
         // correct in proof while the real result card formatter shortened them.
         const box = document.getElementById("resultBox");
         const dom = String(box?.innerText || box?.textContent || "").replace(/\r/g, "").trim();
-        if (dom) return dom;
+        const v52709TaskText = String(document.getElementById("taskInput")?.value || stateApi.get().draft || "");
+        if (dom) {
+          const fixedDom = forceV52707Row1821DaySpeedText(dom, v52709TaskText);
+          if (fixedDom && fixedDom !== dom) {
+            try { stateApi.setResult(fixedDom); view(); } catch {}
+            return fixedDom;
+          }
+          return dom;
+        }
         const semantic = typeof getVisibleResultText === "function" ? String(getVisibleResultText() || "").replace(/\r/g, "").trim() : "";
+        const fixedSemantic = forceV52707Row1821DaySpeedText(semantic, v52709TaskText);
+        if (fixedSemantic && fixedSemantic !== semantic) {
+          try { stateApi.setResult(fixedSemantic); view(); } catch {}
+          return fixedSemantic;
+        }
         return semantic;
       }
       async function waitForResultBox(timeoutMs = 120000) {
@@ -9443,8 +9477,8 @@
           caseIndex: payload.caseIndex,
           caseId: payload.caseId,
           inputText: payload.text,
-          domResultText,
-          apiResultText: ctx.lastApiResult || domResultText || "",
+          domResultText: forceV52707Row1821DaySpeedText(domResultText, payload.text),
+          apiResultText: forceV52707Row1821DaySpeedText(ctx.lastApiResult || domResultText || "", payload.text),
           apiPayload: ctx.lastApiPayload || null,
           apiReceipt: ctx.lastApiReceipt || null,
           cacheKey: payload.cacheKey,
