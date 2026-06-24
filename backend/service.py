@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v527_07_v50103_excel_1801_1900'
-SOLVER_VERSION = 'v527-07-v50103-excel-1801-1900'
+APP_RELEASE = 'v527_08_v50103_excel_1801_1900'
+SOLVER_VERSION = 'v527-08-v50103-excel-1801-1900'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -174,8 +174,8 @@ def _v52707_force_day_speed_visible_payload(payload: dict) -> dict:
     })
     out['structuredSolution'] = dict(out.get('structured_solution') or {})
     source = str(out.get('source') or '').strip()
-    out['source'] = source or 'deepseek-primary; v527.07-attach-release-row-1821-visible-sanitizer'
-    marker = 'v527.07-attach-release-row-1821-visible-sanitizer'
+    out['source'] = source or 'deepseek-primary; v527.08-attach-release-row-1821-visible-sanitizer'
+    marker = 'v527.08-attach-release-row-1821-visible-sanitizer'
     contract = str(out.get('visibleResultContract') or '').strip()
     if marker not in contract:
         out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
