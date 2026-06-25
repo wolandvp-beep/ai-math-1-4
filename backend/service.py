@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v530_02_v50103_excel_2101_2200'
-SOLVER_VERSION = 'v530-02-v50103-excel-2101-2200'
+APP_RELEASE = 'v530_03_v50103_excel_2101_2200'
+SOLVER_VERSION = 'v530-03-v50103-excel-2101-2200'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -15294,6 +15294,21 @@ def _v301_column_title(operator: str) -> str:
     return 'Метод деления в столбик'
 
 
+def _v301_column_title_for_operation(a: str | int, operator: str, b: str | int, *, step_index: int | None = None, result: str | None = None) -> str:
+    shown = _v301_display_operator(operator)
+    base = _v301_column_title(shown)
+    a_text = str(a or '').strip()
+    b_text = str(b or '').strip()
+    if not (a_text and b_text):
+        return base
+    answer = str(result if result is not None else (_v301_compute_operation_answer(a_text, shown, b_text) or '')).strip()
+    display_op = '×' if shown == '×' else ':' if shown == '÷' else shown
+    expression = f'{a_text} {display_op} {b_text}' + (f' = {answer}' if answer else '')
+    if step_index is not None:
+        return f'{base} к действию {step_index}: {expression}'
+    return f'{base}: {expression}'
+
+
 def _v301_pad_digits(value: str | int, width: int) -> list[str]:
     return list(str(value).rjust(width).replace(' ', '')) if False else [ch if ch != ' ' else '' for ch in str(value).rjust(width)]
 
@@ -15462,6 +15477,21 @@ def _v301_first_incomplete_dividend_lead(a: str, b: str, current: int) -> list[s
     return [lead, f'Подобрали первое неполное делимое {current}.']
 
 
+def _v301_division_trailing_zero_transfer_note(dividend_text: str, steps: list[dict[str, Any]], quotient: str, remainder: int) -> str:
+    digits = re.sub(r'\D+', '', str(dividend_text or ''))
+    if not digits or not steps or int(remainder or 0) != 0:
+        return ''
+    last_end = int(steps[-1].get('endIndex') or 0)
+    tail = digits[last_end + 1:]
+    if not tail or not re.fullmatch(r'0+', tail):
+        return ''
+    zero_count = len(tail)
+    quotient_text = str(quotient or '').strip()
+    if zero_count == 1:
+        return f'В делимом остался ноль: переносим его в частное и получаем {quotient_text}.'
+    return f'В делимом остались {zero_count} нуля: переносим их в частное и получаем {quotient_text}.'
+
+
 def _v301_division_notes(a: str, b: str) -> list[str]:
     divisor = int(b)
     if divisor == 0:
@@ -15470,6 +15500,7 @@ def _v301_division_notes(a: str, b: str) -> list[str]:
     if not steps:
         return ['Определяем первое неполное делимое. Оно должно быть больше или равно делителю.', 'Делимое меньше делителя, поэтому в частном пишем 0.']
     notes: list[str] = []
+    zero_transfer_note = _v301_division_trailing_zero_transfer_note(str(a), steps, quotient, remainder)
     notes.extend(_v301_first_incomplete_dividend_lead(str(a), str(b), int(steps[0]['current'])))
     for index, step in enumerate(steps):
         current = int(step['current']); q_digit = int(step['qDigit']); product = int(step['product']); rem = int(step['remainder'])
@@ -15485,6 +15516,8 @@ def _v301_division_notes(a: str, b: str) -> list[str]:
         if next_step:
             notes.append(f'Сносим следующую цифру и получаем {int(next_step["current"])}.')
         elif rem == 0:
+            if zero_transfer_note:
+                notes.append(zero_transfer_note)
             notes.append('Деление закончено без остатка.')
         else:
             notes.append(f'Получаем остаток {rem}. Он меньше делителя, значит деление закончено.')
@@ -15526,7 +15559,7 @@ def _v301_visible_for_direct_operation(original_text: str, op: dict[str, Any]) -
     lines: list[str] = []
     if pure_direct:
         lines.extend(_v301_operation_lead_lines({'a': a, 'operator': operator, 'b': b}))
-    lines.append(_v301_column_title(operator))
+    lines.append(_v301_column_title_for_operation(a, operator, b, result=answer))
     lines.extend(_v301_column_notes(a, operator, b))
     if answer:
         lines.append(f'Ответ: {answer}')
@@ -15625,7 +15658,7 @@ def _v301_visible_for_compound_expression(expr: str) -> str | None:
         result = str(op.get('result') or _v301_compute_operation_answer(a, operator, b))
         lines.append(f'{idx}) {a} {operator} {b} = {result}')
         if _v301_should_use_column_operation(a, operator, b):
-            lines.append(_v301_column_title(operator))
+            lines.append(_v301_column_title_for_operation(a, operator, b, step_index=idx, result=result))
             lines.extend(_v301_column_notes(a, operator, b))
     full = _v301_full_solution_line(pretty, operations)
     if full:

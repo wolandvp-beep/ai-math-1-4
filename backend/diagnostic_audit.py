@@ -303,16 +303,19 @@ def _excel_visible_step_unit_explanation_issues(case: dict[str, Any], result: st
         if not method_match:
             continue
         expected_op = method_ops.get(method_match.group(1))
-        matched_action = None
-        for back in range(idx - 1, -1, -1):
-            candidate = visible_lines[back]
-            candidate_low = candidate.lower().replace('ё', 'е')
-            if re.match(r'^(?:ответ:|метод)\b', candidate_low):
-                break
-            action_match = primary_action.search(candidate)
-            if action_match and _v53002_normalize_column_op(action_match.group(2)) == expected_op:
-                matched_action = action_match
-                break
+        matched_action = re.search(r':\s*(-?\d+)\s*([+\-−–—×xXхХ*·:/÷])\s*(\d+)\s*=', line)
+        if matched_action and _v53002_normalize_column_op(matched_action.group(2)) != expected_op:
+            matched_action = None
+        if not matched_action:
+            for back in range(idx - 1, -1, -1):
+                candidate = visible_lines[back]
+                candidate_low = candidate.lower().replace('ё', 'е')
+                if re.match(r'^(?:ответ:|метод)\b', candidate_low):
+                    break
+                action_match = primary_action.search(candidate)
+                if action_match and _v53002_normalize_column_op(action_match.group(2)) == expected_op:
+                    matched_action = action_match
+                    break
         if matched_action and _v40505_column_method_forbidden(matched_action.group(1), matched_action.group(2), matched_action.group(3)):
             issues.append('Excel numeric regression: column method must not be rendered for mental addition or subtraction with round/one-digit subtrahend rule')
             break

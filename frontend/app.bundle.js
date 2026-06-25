@@ -1,5 +1,5 @@
 (() => {
-  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v530_02_v50103_excel_2101_2200";
+  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v530_03_v50103_excel_2101_2200";
   // src/i18n/ru.js
   var ru = {
     "app.name": "\u041C\u0430\u0442\u0435\u043C\u0430\u0442\u0438\u0447\u043A\u0430",
@@ -1095,7 +1095,7 @@
     DEFAULT_LANGUAGE: "ru",
     ENABLE_DEMO_FALLBACK: true
   };
-  var EXPECTED_BACKEND_RELEASE = "v530_02_v50103_excel_2101_2200";
+  var EXPECTED_BACKEND_RELEASE = "v530_03_v50103_excel_2101_2200";
 
   // src/storage/installIdStorage.js
   var KEY5 = "matematichka_install_id";
@@ -1930,6 +1930,22 @@
     if (operator === "\xD7") return "\u041C\u0435\u0442\u043E\u0434 \u0443\u043C\u043D\u043E\u0436\u0435\u043D\u0438\u044F \u0432 \u0441\u0442\u043E\u043B\u0431\u0438\u043A";
     return "\u041C\u0435\u0442\u043E\u0434 \u0434\u0435\u043B\u0435\u043D\u0438\u044F \u0432 \u0441\u0442\u043E\u043B\u0431\u0438\u043A";
   }
+  function formatColumnOperationExpression(operation) {
+    if (!operation) return "";
+    const a = String(operation.a ?? "").trim();
+    const b = String(operation.b ?? "").trim();
+    if (!a || !b) return "";
+    const op = operation.operator === "\xF7" ? ":" : operation.operator === "\xD7" ? "\xD7" : operation.operator;
+    const result = getOperationDisplayedResult(operation) || computeOperationAnswerValue(operation);
+    return `${a} ${op} ${b}${result ? ` = ${result}` : ""}`;
+  }
+  function formatColumnMethodContextTitle(operation, stepNumber = null) {
+    const base = formatMethodTitle(operation?.operator);
+    const expression = formatColumnOperationExpression(operation);
+    if (!expression) return base;
+    if (stepNumber) return `${base} к действию ${stepNumber}: ${expression}`;
+    return `${base}: ${expression}`;
+  }
   function parseDivisionNotePayload(text) {
     const match = String(text || "").match(/^(\d+)\s*[÷:]\s*(\d+)\s*=\s*(\d+),\s*(\d+)\s*[×x]\s*\2\s*=\s*(\d+)(?:,\s*остаток\s*(\d+))?$/i);
     if (!match) return null;
@@ -2028,6 +2044,19 @@
     const leadLine = fragments.length ? `\u041E\u043F\u0440\u0435\u0434\u0435\u043B\u044F\u0435\u043C \u043F\u0435\u0440\u0432\u043E\u0435 \u043D\u0435\u043F\u043E\u043B\u043D\u043E\u0435 \u0434\u0435\u043B\u0438\u043C\u043E\u0435. \u041E\u043D\u043E \u0434\u043E\u043B\u0436\u043D\u043E \u0431\u044B\u0442\u044C \u0431\u043E\u043B\u044C\u0448\u0435 \u0438\u043B\u0438 \u0440\u0430\u0432\u043D\u043E \u0434\u0435\u043B\u0438\u0442\u0435\u043B\u044E. \u041F\u043E\u0434\u0431\u0438\u0440\u0430\u0435\u043C: ${fragments.join(", ")}.` : "\u041E\u043F\u0440\u0435\u0434\u0435\u043B\u044F\u0435\u043C \u043F\u0435\u0440\u0432\u043E\u0435 \u043D\u0435\u043F\u043E\u043B\u043D\u043E\u0435 \u0434\u0435\u043B\u0438\u043C\u043E\u0435. \u041E\u043D\u043E \u0434\u043E\u043B\u0436\u043D\u043E \u0431\u044B\u0442\u044C \u0431\u043E\u043B\u044C\u0448\u0435 \u0438\u043B\u0438 \u0440\u0430\u0432\u043D\u043E \u0434\u0435\u043B\u0438\u0442\u0435\u043B\u044E.";
     return [leadLine, `\u041F\u043E\u0434\u043E\u0431\u0440\u0430\u043B\u0438 \u043F\u0435\u0440\u0432\u043E\u0435 \u043D\u0435\u043F\u043E\u043B\u043D\u043E\u0435 \u0434\u0435\u043B\u0438\u043C\u043E\u0435 ${current}.`];
   }
+  function buildDivisionTrailingZeroTransferNote(operation) {
+    const dividendText = String(operation?.a || "").replace(/\D/g, "");
+    const divisor = Number(String(operation?.b || "").replace(/\D/g, ""));
+    if (!dividendText || !Number.isFinite(divisor) || divisor <= 0) return "";
+    const division = buildDivisionSteps(dividendText, divisor);
+    if (!division.steps?.length || Number(division.remainder || 0) !== 0) return "";
+    const lastStep = division.steps[division.steps.length - 1];
+    const tail = dividendText.slice(Number(lastStep.endIndex || 0) + 1);
+    if (!tail || !/^0+$/.test(tail)) return "";
+    const zeroCount = tail.length;
+    if (zeroCount === 1) return `В делимом остался ноль: переносим его в частное и получаем ${division.quotient}.`;
+    return `В делимом остались ${zeroCount} нуля: переносим их в частное и получаем ${division.quotient}.`;
+  }
   function normalizeDivisionNotes(notes, operation) {
     const trimmed = trimNotes(notes, 12);
     if (!trimmed.length) return [];
@@ -2088,6 +2117,8 @@
           text: `\u0421\u043D\u043E\u0441\u0438\u043C \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0443\u044E \u0446\u0438\u0444\u0440\u0443 \u0438 \u043F\u043E\u043B\u0443\u0447\u0430\u0435\u043C ${Number(nextPayload.current)}.`
         });
       } else if (remainder === 0) {
+        const zeroTransferNote = buildDivisionTrailingZeroTransferNote(operation);
+        if (zeroTransferNote) normalized.push({ ...note, text: zeroTransferNote });
         normalized.push({ ...note, text: "\u0414\u0435\u043B\u0435\u043D\u0438\u0435 \u0437\u0430\u043A\u043E\u043D\u0447\u0435\u043D\u043E \u0431\u0435\u0437 \u043E\u0441\u0442\u0430\u0442\u043A\u0430." });
       } else {
         normalized.push({ ...note, text: `\u041F\u043E\u043B\u0443\u0447\u0430\u0435\u043C \u043E\u0441\u0442\u0430\u0442\u043E\u043A ${remainder}. \u041E\u043D \u043C\u0435\u043D\u044C\u0448\u0435 \u0434\u0435\u043B\u0438\u0442\u0435\u043B\u044F, \u0437\u043D\u0430\u0447\u0438\u0442 \u0434\u0435\u043B\u0435\u043D\u0438\u0435 \u0437\u0430\u043A\u043E\u043D\u0447\u0435\u043D\u043E.` });
@@ -2112,7 +2143,7 @@
   function decorateColumnModel(model, operation) {
     return {
       ...model,
-      title: formatMethodTitle(operation.operator),
+      title: formatColumnMethodContextTitle(operation),
       inlineText: "",
       notes: normalizeTeachingNotes(model.notes || [], operation.operator, operation)
     };
@@ -3877,7 +3908,7 @@
   }
   function isColumnMethodTitleLine(text) {
     const value = normalizeColumnRenderDuplicateKey(text);
-    return /^метод\s+(?:сложения|вычитания|умножения|деления)\s+в\s+столбик$/.test(value);
+    return /^метод\s+(?:сложения|вычитания|умножения|деления)\s+в\s+столбик(?:\s*(?::|к\s+действию\s+\d+).*)?$/.test(value);
   }
   function isColumnNotesHeadingLine(text) {
     const value = normalizeColumnRenderDuplicateKey(text);
@@ -3899,6 +3930,7 @@
       || /^смотрим,\s+сколько\s+раз/.test(value)
       || /^пишем\s+\d+\s+в\s+частном\s+и\s+вычитаем/.test(value)
       || /^сносим\s+следующую\s+цифру/.test(value)
+      || /^в\s+делимом\s+остал/.test(value) && /переносим/.test(value)
       || /^деление\s+закончено/.test(value)
       || /^получаем\s+остаток\s+\d+/.test(value)
       || /^делимое\s+меньше\s+делителя/.test(value)
@@ -4040,6 +4072,37 @@
   function lineMatchesOperation(line, operation) {
     const normalizedLine = normalizeMathMatchText(line);
     return buildOperationFragments(operation).some((fragment) => normalizedLine.includes(normalizeMathMatchText(fragment)));
+  }
+  function extractNumericResultFromLine(line) {
+    const match = String(line || "").match(/=\s*(-?\d+(?:[,.]\d+)?)(?=\s*(?:\(|[—–\-.!?,;:]|$|[а-яёa-z]))/i);
+    if (!match) return null;
+    const value = Number(String(match[1]).replace(",", "."));
+    return Number.isFinite(value) ? value : null;
+  }
+  function expressionPartHasOperatorForOperation(expressionText, operation) {
+    const source = String(expressionText || "");
+    if (operation?.operator === "×") return /[×xXхХ*·]/.test(source);
+    if (operation?.operator === "÷") return /[:/÷]/.test(source);
+    if (operation?.operator === "+") return /\+/.test(source);
+    if (operation?.operator === "-") return /[-−–—]/.test(source);
+    return false;
+  }
+  function lineCanHostDerivedOperationResult(line, operation) {
+    const source = String(line || "").trim();
+    if (!source || !operation || !/^\d+\)/.test(source)) return false;
+    const equalsIndex = source.indexOf("=");
+    if (equalsIndex <= 0) return false;
+    const expressionText = source.slice(0, equalsIndex);
+    if (!expressionPartHasOperatorForOperation(expressionText, operation)) return false;
+    const operandPattern = new RegExp(`(^|[^0-9])${escapeRegexValue(operation.b)}([^0-9]|$)`);
+    if (!operandPattern.test(expressionText)) return false;
+    const lineResult = extractNumericResultFromLine(source);
+    const operationResultText = getOperationDisplayedResult(operation);
+    const operationResult = Number(String(operationResultText || "").replace(",", "."));
+    return Number.isFinite(lineResult) && Number.isFinite(operationResult) && Math.abs(lineResult - operationResult) < 1e-9;
+  }
+  function lineCanHostOperationBlock(line, operation) {
+    return lineMatchesOperation(line, operation) || lineCanHostDerivedOperationResult(line, operation);
   }
   function getOperationDisplayedResult(operation) {
     const explicit = String(operation?.result || "").trim();
@@ -5924,6 +5987,14 @@
   function formatSyntheticStepHeader(operation, stepIndex) {
     return formatOperationStepLine(stepIndex, operation);
   }
+  function withColumnActionContext(block, lineText, fallbackStepNumber = null) {
+    const stepNumber = getStepNumberFromLine(lineText) || fallbackStepNumber;
+    if (!stepNumber || !block?.operation) return block;
+    return {
+      ...block,
+      title: formatColumnMethodContextTitle(block.operation, stepNumber)
+    };
+  }
   function buildFlowItems(bodyLineItems, blocks, options = {}) {
     const { showSyntheticStepHeaders = false, orderGuideBlock = null, operations = [] } = options;
     const flowItems = [];
@@ -5957,15 +6028,22 @@
       if (matchedOperation && /^\d+\)/.test(item.text.trim())) {
         nextItem = { ...item, text: simplifyExistingStepLine(item.text, matchedOperation) };
       }
-      const blockIndex = blocks.findIndex((block, index) => !usedBlockIndexes.has(index) && lineMatchesOperation(nextItem.text, block.operation));
-      if (blockIndex >= 0) {
-        const block = blocks[blockIndex];
+      const blockIndexes = blocks
+        .map((block, index) => ({ block, index }))
+        .filter(({ block, index }) => !usedBlockIndexes.has(index) && lineCanHostOperationBlock(nextItem.text, block.operation))
+        .map(({ index }) => index);
+      if (blockIndexes.length) {
+        const primaryBlock = blocks[blockIndexes[0]];
         if (/^\d+\)/.test(nextItem.text.trim())) {
-          nextItem = { ...nextItem, text: ensureStepLineHasResult(nextItem.text, block.operation) };
+          nextItem = { ...nextItem, text: ensureStepLineHasResult(nextItem.text, primaryBlock.operation) };
         }
-        usedBlockIndexes.add(blockIndex);
         flowItems.push({ type: "line", item: nextItem });
-        flowItems.push({ type: "block", block });
+        blockIndexes.forEach((matchedBlockIndex) => {
+          const block = blocks[matchedBlockIndex];
+          usedBlockIndexes.add(matchedBlockIndex);
+          const contextualBlock = withColumnActionContext(block, nextItem.text);
+          flowItems.push({ type: "block", block: contextualBlock });
+        });
         while (lineCursor + 1 < bodyLineItems.length) {
           const lookaheadText = String(bodyLineItems[lineCursor + 1]?.text || "").trim();
           if (!lookaheadText) {
@@ -6015,7 +6093,8 @@
           item: { text: formatSyntheticStepHeader(block.operation, stepIndex) }
         });
       }
-      flowItems.push({ type: "block", block });
+      const contextualBlock = showSyntheticStepHeaders ? withColumnActionContext(block, "", findOperationStepIndex(block.operation) || index + 1) : block;
+      flowItems.push({ type: "block", block: contextualBlock });
     });
     return flowItems;
   }
@@ -9388,8 +9467,8 @@
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const normBase = (value) => String(value || "").trim().replace(/\/+$/g, "");
       const backendBase = normBase(params.get("backendBaseUrl") || params.get("backend") || REMOTE_EXPLAIN_PROXY_URL.replace(/\/api\/explain.*$/i, ""));
-      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v530_02_v50103_excel_2101_2200");
-      const auditKey = String(params.get("auditKey") || params.get("key") || "v530-02-live-audit");
+      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v530_03_v50103_excel_2101_2200");
+      const auditKey = String(params.get("auditKey") || params.get("key") || "v530-03-live-audit");
       const auditSection = String(params.get("section") || params.get("auditSection") || "excel_numeric_regression");
       const auditOffset = String(params.get("offset") || "2100");
       const auditLimit = String(params.get("limit") || "100");
