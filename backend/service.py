@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v530_03_v50103_excel_2101_2200'
-SOLVER_VERSION = 'v530-03-v50103-excel-2101-2200'
+APP_RELEASE = 'v530_04_v50103_excel_2101_2200'
+SOLVER_VERSION = 'v530-04-v50103-excel-2101-2200'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -15304,8 +15304,6 @@ def _v301_column_title_for_operation(a: str | int, operator: str, b: str | int, 
     answer = str(result if result is not None else (_v301_compute_operation_answer(a_text, shown, b_text) or '')).strip()
     display_op = '×' if shown == '×' else ':' if shown == '÷' else shown
     expression = f'{a_text} {display_op} {b_text}' + (f' = {answer}' if answer else '')
-    if step_index is not None:
-        return f'{base} к действию {step_index}: {expression}'
     return f'{base}: {expression}'
 
 
@@ -15393,8 +15391,21 @@ def _v301_multiplication_notes(a: str, b: str) -> list[str]:
     multiplicand = str(a); multiplier = str(b)
     notes: list[str] = []
     multiplier_digits = list(multiplier)
+    trailing_zero_count = len(multiplier) - len(multiplier.rstrip('0')) if len(multiplier) > 1 else 0
     for row_index in range(len(multiplier_digits) - 1, -1, -1):
         digit = int(multiplier_digits[row_index])
+        if digit == 0 and len(multiplier_digits) > 1:
+            if trailing_zero_count and row_index >= len(multiplier_digits) - trailing_zero_count:
+                if row_index == len(multiplier_digits) - 1:
+                    if trailing_zero_count == 1:
+                        notes.append('В конце второго множителя стоит 0: он даёт сдвиг на 1 разряд, поэтому нулевое неполное произведение не записываем отдельно.')
+                    else:
+                        zero_word = 'нуля' if 2 <= trailing_zero_count <= 4 else 'нулей'
+                        rank_word = 'разряда' if 2 <= trailing_zero_count <= 4 else 'разрядов'
+                        notes.append(f'В конце второго множителя {trailing_zero_count} {zero_word}: они дают сдвиг на {trailing_zero_count} {rank_word}, поэтому нулевые неполные произведения не записываем отдельно.')
+                continue
+            notes.append('Во втором множителе в этом разряде стоит 0: нулевое неполное произведение не записываем отдельно.')
+            continue
         carry = 0
         for a_digit_ch in reversed(multiplicand):
             a_digit = int(a_digit_ch)

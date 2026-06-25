@@ -1,5 +1,5 @@
 (() => {
-  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v530_03_v50103_excel_2101_2200";
+  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v530_04_v50103_excel_2101_2200";
   // src/i18n/ru.js
   var ru = {
     "app.name": "\u041C\u0430\u0442\u0435\u043C\u0430\u0442\u0438\u0447\u043A\u0430",
@@ -1095,7 +1095,7 @@
     DEFAULT_LANGUAGE: "ru",
     ENABLE_DEMO_FALLBACK: true
   };
-  var EXPECTED_BACKEND_RELEASE = "v530_03_v50103_excel_2101_2200";
+  var EXPECTED_BACKEND_RELEASE = "v530_04_v50103_excel_2101_2200";
 
   // src/storage/installIdStorage.js
   var KEY5 = "matematichka_install_id";
@@ -1943,7 +1943,6 @@
     const base = formatMethodTitle(operation?.operator);
     const expression = formatColumnOperationExpression(operation);
     if (!expression) return base;
-    if (stepNumber) return `${base} к действию ${stepNumber}: ${expression}`;
     return `${base}: ${expression}`;
   }
   function parseDivisionNotePayload(text) {
@@ -2305,11 +2304,26 @@
     const partials = [];
     const notes = [];
     const multiplierDigits = multiplier.split("");
+    const trailingZeroMatch = multiplier.length > 1 ? multiplier.match(/0+$/) : null;
+    const trailingZeroCount = trailingZeroMatch ? trailingZeroMatch[0].length : 0;
     for (let rowIndex = multiplierDigits.length - 1; rowIndex >= 0; rowIndex -= 1) {
       const digit = Number(multiplierDigits[rowIndex]);
       const shift = multiplierDigits.length - 1 - rowIndex;
       const color = getStepColor(shift);
       if (digit === 0 && multiplierDigits.length > 1) {
+        if (trailingZeroCount && rowIndex >= multiplierDigits.length - trailingZeroCount) {
+          if (rowIndex === multiplierDigits.length - 1) {
+            if (trailingZeroCount === 1) {
+              notes.push(makeNote("В конце второго множителя стоит 0: он даёт сдвиг на 1 разряд, поэтому нулевое неполное произведение не записываем отдельно.", color));
+            } else {
+              const zeroWord = trailingZeroCount >= 2 && trailingZeroCount <= 4 ? "нуля" : "нулей";
+              const rankWord = trailingZeroCount >= 2 && trailingZeroCount <= 4 ? "разряда" : "разрядов";
+              notes.push(makeNote(`В конце второго множителя ${trailingZeroCount} ${zeroWord}: они дают сдвиг на ${trailingZeroCount} ${rankWord}, поэтому нулевые неполные произведения не записываем отдельно.`, color));
+            }
+          }
+          continue;
+        }
+        notes.push(makeNote("Во втором множителе в этом разряде стоит 0: нулевое неполное произведение не записываем отдельно.", color));
         continue;
       }
       const rowDigits = multiplicand.split("");
@@ -3923,6 +3937,7 @@
       || /^\d+\s+меньше\s+\d+[, ]/.test(value) && /занимаем\s+1/.test(value)
       || /^первое\s+число\s+меньше\s+второго/.test(value)
       || /^умножаем\s+\d+\s+на\s+\d+/.test(value)
+      || /^(?:в\s+конце\s+второго\s+множителя|во\s+втором\s+множителе\s+в\s+этом\s+разряде).*нулевое\s+неполное\s+произведение/.test(value)
       || /^оставшийся\s+перенос\s+\d+\s+дописываем/.test(value)
       || /^определяем\s+первое\s+неполное\s+делимое/.test(value)
       || /^подобрали\s+первое\s+неполное\s+делимое/.test(value)
@@ -9467,8 +9482,8 @@
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const normBase = (value) => String(value || "").trim().replace(/\/+$/g, "");
       const backendBase = normBase(params.get("backendBaseUrl") || params.get("backend") || REMOTE_EXPLAIN_PROXY_URL.replace(/\/api\/explain.*$/i, ""));
-      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v530_03_v50103_excel_2101_2200");
-      const auditKey = String(params.get("auditKey") || params.get("key") || "v530-03-live-audit");
+      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v530_04_v50103_excel_2101_2200");
+      const auditKey = String(params.get("auditKey") || params.get("key") || "v530-04-live-audit");
       const auditSection = String(params.get("section") || params.get("auditSection") || "excel_numeric_regression");
       const auditOffset = String(params.get("offset") || "2100");
       const auditLimit = String(params.get("limit") || "100");
