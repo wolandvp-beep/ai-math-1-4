@@ -1,5 +1,5 @@
 (() => {
-  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v531_03_v50103_excel_2201_2300";
+  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v531_04_v50103_excel_2201_2300";
   // src/i18n/ru.js
   var ru = {
     "app.name": "\u041C\u0430\u0442\u0435\u043C\u0430\u0442\u0438\u0447\u043A\u0430",
@@ -1099,7 +1099,7 @@
     DEFAULT_LANGUAGE: "ru",
     ENABLE_DEMO_FALLBACK: true
   };
-  var EXPECTED_BACKEND_RELEASE = "v531_03_v50103_excel_2201_2300";
+  var EXPECTED_BACKEND_RELEASE = "v531_04_v50103_excel_2201_2300";
 
   // src/storage/installIdStorage.js
   var KEY5 = "matematichka_install_id";
@@ -2352,15 +2352,24 @@
     const match = text.match(/0+$/);
     return match ? match[0].length : 0;
   }
+  function stripTrailingZeroesForMultiplication(value) {
+    const text = String(value ?? "").trim();
+    if (!/^\d+$/.test(text) || /^0+$/.test(text)) return text;
+    return text.replace(/0+$/, "") || text;
+  }
+  function significantDigitCountForColumnMultiplication(value) {
+    const core = stripTrailingZeroesForMultiplication(value);
+    return core.length || String(value ?? "").length;
+  }
   function trailingZeroEndingText(count) {
-    if (count === 1) return "нулём";
+    if (count === 1) return "одним нулём";
     if (count === 2) return "двумя нулями";
     if (count === 3) return "тремя нулями";
     if (count === 4) return "четырьмя нулями";
     return `${count} нулями`;
   }
   function trailingZeroAppendText(count) {
-    if (count === 1) return "нуль";
+    if (count === 1) return "ноль";
     if (count === 2) return "два нуля";
     if (count === 3) return "три нуля";
     if (count === 4) return "четыре нуля";
@@ -2369,17 +2378,18 @@
   function chooseColumnMultiplicationFactors(a, b) {
     const left = String(a);
     const right = String(b);
-    const leftZeroes = countTrailingZeroesText(left);
-    const rightZeroes = countTrailingZeroesText(right);
-    if (leftZeroes > 0 && rightZeroes === 0) {
-      return { top: right, bottom: left, swapped: true };
-    }
-    if (rightZeroes > 0 && leftZeroes === 0) {
-      return { top: left, bottom: right, swapped: false };
-    }
+    const leftCoreLen = significantDigitCountForColumnMultiplication(left);
+    const rightCoreLen = significantDigitCountForColumnMultiplication(right);
     let top = left;
     let bottom = right;
-    const shouldSwap = top.length < bottom.length || top.length === bottom.length && Number(top) < Number(bottom);
+    let shouldSwap = false;
+    if (leftCoreLen < rightCoreLen) {
+      shouldSwap = true;
+    } else if (leftCoreLen === rightCoreLen) {
+      // If the useful part has the same length, keep the shorter full number below;
+      // if lengths also match, put the smaller multiplier below.
+      shouldSwap = left.length < right.length || left.length === right.length && Number(left) < Number(right);
+    }
     if (shouldSwap) {
       [top, bottom] = [bottom, top];
     }
@@ -2394,18 +2404,18 @@
     const multiplierTrailingZeroCount = countTrailingZeroesText(multiplier);
     const multiplierCore = multiplierTrailingZeroCount ? multiplier.slice(0, multiplier.length - multiplierTrailingZeroCount) || "0" : multiplier;
     const multiplicandCore = multiplicandTrailingZeroCount ? multiplicand.slice(0, multiplicand.length - multiplicandTrailingZeroCount) || "0" : multiplicand;
-    const useBothTrailingZeroShortcut = multiplicandTrailingZeroCount > 0 && multiplierTrailingZeroCount > 0 && /^[1-9]\d*$/.test(multiplicandCore) && /^[1-9]\d*$/.test(multiplierCore);
-    const shortcutZeroCount = useBothTrailingZeroShortcut ? multiplicandTrailingZeroCount + multiplierTrailingZeroCount : multiplierTrailingZeroCount;
-    const activeMultiplicand = useBothTrailingZeroShortcut ? multiplicandCore : multiplicand;
-    const useTrailingZeroShortcut = shortcutZeroCount > 0 && /^[1-9]\d*$/.test(multiplierCore) && /^[1-9]\d*$/.test(activeMultiplicand);
+    const shortcutZeroCount = multiplicandTrailingZeroCount + multiplierTrailingZeroCount;
+    const useTrailingZeroShortcut = shortcutZeroCount > 0 && /^[1-9]\d*$/.test(multiplierCore) && /^[1-9]\d*$/.test(multiplicandCore);
+    const activeMultiplicand = useTrailingZeroShortcut ? multiplicandCore : multiplicand;
     const multiplierDigits = (useTrailingZeroShortcut ? multiplierCore : multiplier).split("");
     const baseShift = useTrailingZeroShortcut ? shortcutZeroCount : 0;
     if (useTrailingZeroShortcut) {
-      if (useBothTrailingZeroShortcut) {
-        notes.push(makeNote(`Справа в множителях ${trailingZeroAppendText(shortcutZeroCount)}: сначала умножаем ${multiplicandCore} на ${multiplierCore}.`, getStepColor(0)));
+      if (multiplicandTrailingZeroCount > 0 && multiplierTrailingZeroCount > 0) {
+        notes.push(makeNote(`В множителях справа всего ${trailingZeroAppendText(shortcutZeroCount)}: сначала умножаем ${multiplicandCore} на ${multiplierCore}.`, getStepColor(0)));
+      } else if (multiplierTrailingZeroCount > 0) {
+        notes.push(makeNote(`В числе ${multiplier} справа ${trailingZeroAppendText(shortcutZeroCount)}: сначала умножаем ${multiplicandCore} на ${multiplierCore}.`, getStepColor(0)));
       } else {
-        notes.push(makeNote(`Второй множитель оканчивается ${trailingZeroEndingText(shortcutZeroCount)}: ${trailingZeroAppendText(shortcutZeroCount)} пока не умножаем, а приписываем справа в конце.`, getStepColor(0)));
-        notes.push(makeNote(`Сначала умножаем ${multiplicand} на ${multiplierCore}.`, getStepColor(0)));
+        notes.push(makeNote(`В числе ${multiplicand} справа ${trailingZeroAppendText(shortcutZeroCount)}: сначала умножаем ${multiplicandCore} на ${multiplierCore}.`, getStepColor(0)));
       }
     }
     let visiblePartialIndex = 0;
@@ -2457,23 +2467,17 @@
     }
     const width = Math.max(
       result.length,
-      useTrailingZeroShortcut ? (useBothTrailingZeroShortcut ? Math.max(multiplicandCore.length, multiplierCore.length) + shortcutZeroCount : Math.max(multiplicand.length, multiplierCore.length) + shortcutZeroCount) : multiplicand.length,
+      useTrailingZeroShortcut ? Math.max(multiplicandCore.length, multiplierCore.length) + shortcutZeroCount : multiplicand.length,
       multiplicand.length,
       multiplier.length,
       ...partials.map((partial) => String(partial.value).length + Number(partial.shift || 0))
     );
     let topDigits;
     let bottomDigits;
-    if (useTrailingZeroShortcut && useBothTrailingZeroShortcut) {
+    if (useTrailingZeroShortcut) {
       const coreWidth = Math.max(multiplicandCore.length, multiplierCore.length, width - shortcutZeroCount);
       topDigits = padDigits(multiplicandCore, coreWidth).concat(Array(multiplicandTrailingZeroCount).fill("0")).concat(Array(multiplierTrailingZeroCount).fill(""));
       bottomDigits = padDigits(multiplierCore, coreWidth).concat(Array(multiplierTrailingZeroCount).fill("0")).concat(Array(multiplicandTrailingZeroCount).fill(""));
-      while (topDigits.length < width) topDigits.unshift("");
-      while (bottomDigits.length < width) bottomDigits.unshift("");
-    } else if (useTrailingZeroShortcut) {
-      const activeWidth = Math.max(multiplicand.length, multiplierCore.length, width - shortcutZeroCount);
-      topDigits = padDigits(multiplicand, activeWidth).concat(Array(shortcutZeroCount).fill(""));
-      bottomDigits = padDigits(multiplierCore, activeWidth).concat(Array(shortcutZeroCount).fill("0"));
       while (topDigits.length < width) topDigits.unshift("");
       while (bottomDigits.length < width) bottomDigits.unshift("");
     } else {
@@ -9656,8 +9660,8 @@
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const normBase = (value) => String(value || "").trim().replace(/\/+$/g, "");
       const backendBase = normBase(params.get("backendBaseUrl") || params.get("backend") || REMOTE_EXPLAIN_PROXY_URL.replace(/\/api\/explain.*$/i, ""));
-      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v531_03_v50103_excel_2201_2300");
-      const auditKey = String(params.get("auditKey") || params.get("key") || "v531-03-live-audit");
+      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v531_04_v50103_excel_2201_2300");
+      const auditKey = String(params.get("auditKey") || params.get("key") || "v531-04-live-audit");
       const auditSection = String(params.get("section") || params.get("auditSection") || "excel_numeric_regression");
       const auditOffset = String(params.get("offset") || "2200");
       const auditLimit = String(params.get("limit") || "100");

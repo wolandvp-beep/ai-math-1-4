@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v531_03_v50103_excel_2201_2300'
-SOLVER_VERSION = 'v531-03-v50103-excel-2201-2300'
+APP_RELEASE = 'v531_04_v50103_excel_2201_2300'
+SOLVER_VERSION = 'v531-04-v50103-excel-2201-2300'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -15393,7 +15393,7 @@ def _v301_subtraction_notes(a: str, b: str) -> list[str]:
 
 def _v301_trailing_zero_phrase(count: int) -> str:
     if count == 1:
-        return 'нуль'
+        return 'ноль'
     if count == 2:
         return 'два нуля'
     if count == 3:
@@ -15405,7 +15405,7 @@ def _v301_trailing_zero_phrase(count: int) -> str:
 
 def _v301_trailing_zero_ending(count: int) -> str:
     if count == 1:
-        return 'нулём'
+        return 'одним нулём'
     if count == 2:
         return 'двумя нулями'
     if count == 3:
@@ -15415,29 +15415,62 @@ def _v301_trailing_zero_ending(count: int) -> str:
     return f'{count} нулями'
 
 
+def _v301_count_trailing_zeroes(value: str | int) -> int:
+    text = str(value or '').strip()
+    if not re.fullmatch(r'\d+', text) or re.fullmatch(r'0+', text or ''):
+        return 0
+    return len(text) - len(text.rstrip('0'))
+
+
+def _v301_strip_trailing_zeroes_for_multiplication(value: str | int) -> str:
+    text = str(value or '').strip()
+    if not re.fullmatch(r'\d+', text) or re.fullmatch(r'0+', text or ''):
+        return text
+    return text.rstrip('0') or text
+
+
+def _v301_significant_digit_count_for_column_multiplication(value: str | int) -> int:
+    core = _v301_strip_trailing_zeroes_for_multiplication(value)
+    return len(core or str(value or ''))
+
+
+def _v301_choose_column_multiplication_factors(a: str | int, b: str | int) -> tuple[str, str]:
+    left = str(a); right = str(b)
+    left_core_len = _v301_significant_digit_count_for_column_multiplication(left)
+    right_core_len = _v301_significant_digit_count_for_column_multiplication(right)
+    should_swap = False
+    if left_core_len < right_core_len:
+        should_swap = True
+    elif left_core_len == right_core_len:
+        try:
+            should_swap = len(left) < len(right) or (len(left) == len(right) and int(left) < int(right))
+        except Exception:
+            should_swap = len(left) < len(right)
+    return (right, left) if should_swap else (left, right)
+
+
 def _v301_multiplication_notes(a: str, b: str) -> list[str]:
-    multiplicand = str(a); multiplier = str(b)
+    multiplicand, multiplier = _v301_choose_column_multiplication_factors(a, b)
     notes: list[str] = []
-    multiplicand_trailing_zero_count = len(multiplicand) - len(multiplicand.rstrip('0')) if len(multiplicand) > 1 else 0
-    multiplier_trailing_zero_count = len(multiplier) - len(multiplier.rstrip('0')) if len(multiplier) > 1 else 0
+    multiplicand_trailing_zero_count = _v301_count_trailing_zeroes(multiplicand)
+    multiplier_trailing_zero_count = _v301_count_trailing_zeroes(multiplier)
     multiplier_core = (multiplier[:-multiplier_trailing_zero_count] if multiplier_trailing_zero_count else multiplier) or '0'
     multiplicand_core = (multiplicand[:-multiplicand_trailing_zero_count] if multiplicand_trailing_zero_count else multiplicand) or '0'
-    use_both_zero_shortcut = (
-        multiplicand_trailing_zero_count > 0 and multiplier_trailing_zero_count > 0
+    shortcut_zero_count = multiplicand_trailing_zero_count + multiplier_trailing_zero_count
+    use_zero_shortcut = (
+        shortcut_zero_count > 0
         and re.fullmatch(r'[1-9]\d*', multiplicand_core or '')
         and re.fullmatch(r'[1-9]\d*', multiplier_core or '')
     )
-    shortcut_zero_count = multiplicand_trailing_zero_count + multiplier_trailing_zero_count if use_both_zero_shortcut else multiplier_trailing_zero_count
-    active_multiplicand = multiplicand_core if use_both_zero_shortcut else multiplicand
-    use_zero_shortcut = shortcut_zero_count > 0 and re.fullmatch(r'[1-9]\d*', multiplier_core or '') and re.fullmatch(r'[1-9]\d*', active_multiplicand or '')
+    active_multiplicand = multiplicand_core if use_zero_shortcut else multiplicand
     multiplier_digits = list(multiplier_core if use_zero_shortcut else multiplier)
     if use_zero_shortcut:
-        if use_both_zero_shortcut:
-            notes.append(f'Справа в множителях {_v301_trailing_zero_phrase(shortcut_zero_count)}: сначала умножаем {multiplicand_core} на {multiplier_core}.')
-        elif shortcut_zero_count == 1:
-            notes.append(f'Второй множитель оканчивается нулём: умножаем на {multiplier_core}, а 0 приписываем справа.')
+        if multiplicand_trailing_zero_count > 0 and multiplier_trailing_zero_count > 0:
+            notes.append(f'В множителях справа всего {_v301_trailing_zero_phrase(shortcut_zero_count)}: сначала умножаем {multiplicand_core} на {multiplier_core}.')
+        elif multiplier_trailing_zero_count > 0:
+            notes.append(f'В числе {multiplier} справа {_v301_trailing_zero_phrase(shortcut_zero_count)}: сначала умножаем {multiplicand_core} на {multiplier_core}.')
         else:
-            notes.append(f'Второй множитель оканчивается {_v301_trailing_zero_ending(shortcut_zero_count)}: умножаем на {multiplier_core}, а эти нули приписываем справа.')
+            notes.append(f'В числе {multiplicand} справа {_v301_trailing_zero_phrase(shortcut_zero_count)}: сначала умножаем {multiplicand_core} на {multiplier_core}.')
     for row_index in range(len(multiplier_digits) - 1, -1, -1):
         digit = int(multiplier_digits[row_index])
         if digit == 0 and len(multiplier_digits) > 1:
