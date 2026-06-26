@@ -1,5 +1,5 @@
 (() => {
-  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v531_02_v50103_excel_2201_2300";
+  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v531_03_v50103_excel_2201_2300";
   // src/i18n/ru.js
   var ru = {
     "app.name": "\u041C\u0430\u0442\u0435\u043C\u0430\u0442\u0438\u0447\u043A\u0430",
@@ -1099,7 +1099,7 @@
     DEFAULT_LANGUAGE: "ru",
     ENABLE_DEMO_FALLBACK: true
   };
-  var EXPECTED_BACKEND_RELEASE = "v531_02_v50103_excel_2201_2300";
+  var EXPECTED_BACKEND_RELEASE = "v531_03_v50103_excel_2201_2300";
 
   // src/storage/installIdStorage.js
   var KEY5 = "matematichka_install_id";
@@ -2148,12 +2148,33 @@
     }
     return normalizeDivisionNotes(source, operation);
   }
+  function columnResultNoteText(operation) {
+    const answer = computeOperationAnswerValue(operation);
+    if (!String(answer || "").trim()) return "";
+    if (operation.operator === "+") return `Получили сумму ${answer}.`;
+    if (operation.operator === "-") return `Получили разность ${answer}.`;
+    if (operation.operator === "×") return `Получили произведение ${answer}.`;
+    if (operation.operator === "÷") {
+      if (/остаток/i.test(String(answer))) return `Получили результат деления: ${answer}.`;
+      return `Получили частное ${answer}.`;
+    }
+    return `Получили ${answer}.`;
+  }
+  function withFinalColumnResultNote(notes, operation) {
+    const finalText = columnResultNoteText(operation);
+    if (!finalText) return notes || [];
+    const normalizedFinal = finalText.trim().toLowerCase();
+    let kept = (notes || []).filter((note) => String(note?.text || "").trim().toLowerCase() !== normalizedFinal);
+    if (kept.length >= 32) kept = kept.slice(0, 31);
+    return [...kept, makeNote(finalText, getStepColor(kept.length))];
+  }
   function decorateColumnModel(model, operation) {
+    const notes = normalizeTeachingNotes(model.notes || [], operation.operator, operation);
     return {
       ...model,
       title: formatColumnMethodContextTitle(operation),
       inlineText: "",
-      notes: normalizeTeachingNotes(model.notes || [], operation.operator, operation)
+      notes: withFinalColumnResultNote(notes, operation)
     };
   }
   function buildAdditionModel(a, b) {
@@ -2369,14 +2390,23 @@
     const result = String(Number(multiplicand) * Number(multiplier));
     const partials = [];
     const notes = [];
-    const trailingZeroCount = countTrailingZeroesText(multiplier);
-    const multiplierCore = trailingZeroCount ? multiplier.slice(0, multiplier.length - trailingZeroCount) || "0" : multiplier;
-    const useTrailingZeroShortcut = trailingZeroCount > 0 && /^[1-9]\d*$/.test(multiplierCore);
+    const multiplicandTrailingZeroCount = countTrailingZeroesText(multiplicand);
+    const multiplierTrailingZeroCount = countTrailingZeroesText(multiplier);
+    const multiplierCore = multiplierTrailingZeroCount ? multiplier.slice(0, multiplier.length - multiplierTrailingZeroCount) || "0" : multiplier;
+    const multiplicandCore = multiplicandTrailingZeroCount ? multiplicand.slice(0, multiplicand.length - multiplicandTrailingZeroCount) || "0" : multiplicand;
+    const useBothTrailingZeroShortcut = multiplicandTrailingZeroCount > 0 && multiplierTrailingZeroCount > 0 && /^[1-9]\d*$/.test(multiplicandCore) && /^[1-9]\d*$/.test(multiplierCore);
+    const shortcutZeroCount = useBothTrailingZeroShortcut ? multiplicandTrailingZeroCount + multiplierTrailingZeroCount : multiplierTrailingZeroCount;
+    const activeMultiplicand = useBothTrailingZeroShortcut ? multiplicandCore : multiplicand;
+    const useTrailingZeroShortcut = shortcutZeroCount > 0 && /^[1-9]\d*$/.test(multiplierCore) && /^[1-9]\d*$/.test(activeMultiplicand);
     const multiplierDigits = (useTrailingZeroShortcut ? multiplierCore : multiplier).split("");
-    const baseShift = useTrailingZeroShortcut ? trailingZeroCount : 0;
+    const baseShift = useTrailingZeroShortcut ? shortcutZeroCount : 0;
     if (useTrailingZeroShortcut) {
-      notes.push(makeNote(`Второй множитель оканчивается ${trailingZeroEndingText(trailingZeroCount)}: ${trailingZeroAppendText(trailingZeroCount)} пока не умножаем, а приписываем справа в конце.`, getStepColor(0)));
-      notes.push(makeNote(`Сначала умножаем ${multiplicand} на ${multiplierCore}.`, getStepColor(0)));
+      if (useBothTrailingZeroShortcut) {
+        notes.push(makeNote(`Справа в множителях ${trailingZeroAppendText(shortcutZeroCount)}: сначала умножаем ${multiplicandCore} на ${multiplierCore}.`, getStepColor(0)));
+      } else {
+        notes.push(makeNote(`Второй множитель оканчивается ${trailingZeroEndingText(shortcutZeroCount)}: ${trailingZeroAppendText(shortcutZeroCount)} пока не умножаем, а приписываем справа в конце.`, getStepColor(0)));
+        notes.push(makeNote(`Сначала умножаем ${multiplicand} на ${multiplierCore}.`, getStepColor(0)));
+      }
     }
     let visiblePartialIndex = 0;
     for (let rowIndex = multiplierDigits.length - 1; rowIndex >= 0; rowIndex -= 1) {
@@ -2387,7 +2417,7 @@
         notes.push(makeNote("Во втором множителе есть 0: при умножении на него получится строка нулей, её не записываем.", color));
         continue;
       }
-      const rowDigits = multiplicand.split("");
+      const rowDigits = activeMultiplicand.split("");
       let carry = 0;
       for (let index = rowDigits.length - 1; index >= 0; index -= 1) {
         const aDigit = Number(rowDigits[index]);
@@ -2403,12 +2433,12 @@
           notes.push(makeNote(`Пишем ${written}, ${carry} дописываем слева.`, color));
         }
       }
-      const rawPartial = Number(multiplicand) * digit;
+      const rawPartial = Number(activeMultiplicand) * digit;
       const shownPartial = rawPartial * 10 ** shift;
       const ordinal = multiplicationOrdinal(visiblePartialIndex);
       const rankText = multiplicationRankText(shift);
       if (useTrailingZeroShortcut && multiplierDigits.length === 1) {
-        notes.push(makeNote(`Получили ${rawPartial}. Приписываем справа ${trailingZeroAppendText(trailingZeroCount)}: ${shownPartial}.`, color));
+        notes.push(makeNote(`Получили ${rawPartial}. Приписываем справа ${trailingZeroAppendText(shortcutZeroCount)}: ${shownPartial}.`, color));
       } else if (shift > 0) {
         notes.push(makeNote(`Получили ${ordinal} неполное произведение: ${rawPartial} ${rankText}, то есть ${shownPartial}.`, color));
       } else if (multiplierDigits.length > 1) {
@@ -2427,16 +2457,23 @@
     }
     const width = Math.max(
       result.length,
-      useTrailingZeroShortcut ? Math.max(multiplicand.length, multiplierCore.length) + trailingZeroCount : multiplicand.length,
+      useTrailingZeroShortcut ? (useBothTrailingZeroShortcut ? Math.max(multiplicandCore.length, multiplierCore.length) + shortcutZeroCount : Math.max(multiplicand.length, multiplierCore.length) + shortcutZeroCount) : multiplicand.length,
+      multiplicand.length,
       multiplier.length,
       ...partials.map((partial) => String(partial.value).length + Number(partial.shift || 0))
     );
     let topDigits;
     let bottomDigits;
-    if (useTrailingZeroShortcut) {
-      const activeWidth = Math.max(multiplicand.length, multiplierCore.length, width - trailingZeroCount);
-      topDigits = padDigits(multiplicand, activeWidth).concat(Array(trailingZeroCount).fill(""));
-      bottomDigits = padDigits(multiplierCore, activeWidth).concat(Array(trailingZeroCount).fill("0"));
+    if (useTrailingZeroShortcut && useBothTrailingZeroShortcut) {
+      const coreWidth = Math.max(multiplicandCore.length, multiplierCore.length, width - shortcutZeroCount);
+      topDigits = padDigits(multiplicandCore, coreWidth).concat(Array(multiplicandTrailingZeroCount).fill("0")).concat(Array(multiplierTrailingZeroCount).fill(""));
+      bottomDigits = padDigits(multiplierCore, coreWidth).concat(Array(multiplierTrailingZeroCount).fill("0")).concat(Array(multiplicandTrailingZeroCount).fill(""));
+      while (topDigits.length < width) topDigits.unshift("");
+      while (bottomDigits.length < width) bottomDigits.unshift("");
+    } else if (useTrailingZeroShortcut) {
+      const activeWidth = Math.max(multiplicand.length, multiplierCore.length, width - shortcutZeroCount);
+      topDigits = padDigits(multiplicand, activeWidth).concat(Array(shortcutZeroCount).fill(""));
+      bottomDigits = padDigits(multiplierCore, activeWidth).concat(Array(shortcutZeroCount).fill("0"));
       while (topDigits.length < width) topDigits.unshift("");
       while (bottomDigits.length < width) bottomDigits.unshift("");
     } else {
@@ -4031,6 +4068,7 @@
       || /^складываем\s+неполные\s+произведения/.test(value)
       || /^(?:в\s+конце\s+второго\s+множителя|во\s+втором\s+множителе\s+в\s+этом\s+разряде).*нулевое\s+неполное\s+произведение/.test(value)
       || /^второй\s+множитель\s+оканчивается/.test(value)
+      || /^справа\s+в\s+множителях/.test(value)
       || /^сначала\s+умножаем\s+\d+\s+на\s+\d+/.test(value)
       || /^получили\s+\d+\.\s+приписываем\s+справа/.test(value)
       || /^во\s+втором\s+множителе\s+есть\s+0/.test(value)
@@ -4043,6 +4081,8 @@
       || /^пишем\s+\d+\s+в\s+частном\s+и\s+вычитаем/.test(value)
       || /^сносим\s+следующую\s+цифру/.test(value)
       || /^в\s+делимом\s+остал/.test(value) && /переносим/.test(value)
+      || /^получили\s+(?:сумму|разность|произведение)\s+-?\d+/.test(value)
+      || /^получили\s+результат\s+деления/.test(value)
       || /^получили\s+частное\s+\d+/.test(value)
       || /^деление\s+закончено/.test(value)
       || /^получаем\s+остаток\s+\d+/.test(value)
@@ -9616,8 +9656,8 @@
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const normBase = (value) => String(value || "").trim().replace(/\/+$/g, "");
       const backendBase = normBase(params.get("backendBaseUrl") || params.get("backend") || REMOTE_EXPLAIN_PROXY_URL.replace(/\/api\/explain.*$/i, ""));
-      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v531_02_v50103_excel_2201_2300");
-      const auditKey = String(params.get("auditKey") || params.get("key") || "v531-02-live-audit");
+      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v531_03_v50103_excel_2201_2300");
+      const auditKey = String(params.get("auditKey") || params.get("key") || "v531-03-live-audit");
       const auditSection = String(params.get("section") || params.get("auditSection") || "excel_numeric_regression");
       const auditOffset = String(params.get("offset") || "2200");
       const auditLimit = String(params.get("limit") || "100");

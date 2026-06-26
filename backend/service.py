@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v531_02_v50103_excel_2201_2300'
-SOLVER_VERSION = 'v531-02-v50103-excel-2201-2300'
+APP_RELEASE = 'v531_03_v50103_excel_2201_2300'
+SOLVER_VERSION = 'v531-03-v50103-excel-2201-2300'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -15385,49 +15385,81 @@ def _v301_subtraction_notes(a: str, b: str) -> list[str]:
                 notes.append(f'Вычитаем в этом разряде: 10 - 1 = {step_value}.')
             else:
                 notes.append(f'Вычитаем в этом разряде: {top_digit} - 1 = {step_value}.')
+        elif top[index] and index < width - 1 and top_digit != 0:
+            notes.append(f'В старшем разряде ничего не вычитаем, сносим {top_digit}.')
         borrow_in = borrow_out
     return notes[:20]
+
+
+def _v301_trailing_zero_phrase(count: int) -> str:
+    if count == 1:
+        return 'нуль'
+    if count == 2:
+        return 'два нуля'
+    if count == 3:
+        return 'три нуля'
+    if count == 4:
+        return 'четыре нуля'
+    return f'{count} нулей'
+
+
+def _v301_trailing_zero_ending(count: int) -> str:
+    if count == 1:
+        return 'нулём'
+    if count == 2:
+        return 'двумя нулями'
+    if count == 3:
+        return 'тремя нулями'
+    if count == 4:
+        return 'четырьмя нулями'
+    return f'{count} нулями'
 
 
 def _v301_multiplication_notes(a: str, b: str) -> list[str]:
     multiplicand = str(a); multiplier = str(b)
     notes: list[str] = []
-    multiplier_digits = list(multiplier)
-    trailing_zero_count = len(multiplier) - len(multiplier.rstrip('0')) if len(multiplier) > 1 else 0
-    multiplier_without_trailing_zeroes = (multiplier[:-trailing_zero_count] if trailing_zero_count else multiplier) or '0'
-    if trailing_zero_count == 2:
-        trailing_zero_ending_text = 'двумя нулями'
-    elif trailing_zero_count == 3:
-        trailing_zero_ending_text = 'тремя нулями'
-    elif trailing_zero_count == 4:
-        trailing_zero_ending_text = 'четырьмя нулями'
-    else:
-        trailing_zero_ending_text = f'{trailing_zero_count} нулями'
+    multiplicand_trailing_zero_count = len(multiplicand) - len(multiplicand.rstrip('0')) if len(multiplicand) > 1 else 0
+    multiplier_trailing_zero_count = len(multiplier) - len(multiplier.rstrip('0')) if len(multiplier) > 1 else 0
+    multiplier_core = (multiplier[:-multiplier_trailing_zero_count] if multiplier_trailing_zero_count else multiplier) or '0'
+    multiplicand_core = (multiplicand[:-multiplicand_trailing_zero_count] if multiplicand_trailing_zero_count else multiplicand) or '0'
+    use_both_zero_shortcut = (
+        multiplicand_trailing_zero_count > 0 and multiplier_trailing_zero_count > 0
+        and re.fullmatch(r'[1-9]\d*', multiplicand_core or '')
+        and re.fullmatch(r'[1-9]\d*', multiplier_core or '')
+    )
+    shortcut_zero_count = multiplicand_trailing_zero_count + multiplier_trailing_zero_count if use_both_zero_shortcut else multiplier_trailing_zero_count
+    active_multiplicand = multiplicand_core if use_both_zero_shortcut else multiplicand
+    use_zero_shortcut = shortcut_zero_count > 0 and re.fullmatch(r'[1-9]\d*', multiplier_core or '') and re.fullmatch(r'[1-9]\d*', active_multiplicand or '')
+    multiplier_digits = list(multiplier_core if use_zero_shortcut else multiplier)
+    if use_zero_shortcut:
+        if use_both_zero_shortcut:
+            notes.append(f'Справа в множителях {_v301_trailing_zero_phrase(shortcut_zero_count)}: сначала умножаем {multiplicand_core} на {multiplier_core}.')
+        elif shortcut_zero_count == 1:
+            notes.append(f'Второй множитель оканчивается нулём: умножаем на {multiplier_core}, а 0 приписываем справа.')
+        else:
+            notes.append(f'Второй множитель оканчивается {_v301_trailing_zero_ending(shortcut_zero_count)}: умножаем на {multiplier_core}, а эти нули приписываем справа.')
     for row_index in range(len(multiplier_digits) - 1, -1, -1):
         digit = int(multiplier_digits[row_index])
         if digit == 0 and len(multiplier_digits) > 1:
-            if trailing_zero_count and row_index >= len(multiplier_digits) - trailing_zero_count:
-                if row_index == len(multiplier_digits) - 1:
-                    if trailing_zero_count == 1:
-                        notes.append(f'Второй множитель оканчивается нулём: умножаем на {multiplier_without_trailing_zeroes}, а 0 приписываем справа.')
-                    else:
-                        notes.append(f'Второй множитель оканчивается {trailing_zero_ending_text}: умножаем на {multiplier_without_trailing_zeroes}, а эти нули приписываем справа.')
-                continue
             notes.append('В этом разряде второго множителя стоит 0, поэтому отдельную строку с нулями не пишем.')
             continue
         carry = 0
-        for a_digit_ch in reversed(multiplicand):
+        for a_digit_ch in reversed(active_multiplicand):
             a_digit = int(a_digit_ch)
             carry_in = carry
             product = a_digit * digit + carry_in
             written = product % 10
             carry = product // 10
             carry_part = f' и прибавляем {carry_in}' if carry_in else ''
-            notes.append(f'Умножаем {a_digit} на {digit}{carry_part}: получаем {product}.')
+            notes.append(f'Умножаем {digit} на {a_digit}{carry_part}: получаем {product}.')
             if carry:
                 notes.append(f'Пишем {written}, {carry} переносим в следующий разряд.')
         if carry:
             notes.append(f'Оставшийся перенос {carry} дописываем слева.')
+        if use_zero_shortcut and len(multiplier_digits) == 1:
+            raw_partial = int(active_multiplicand) * digit
+            shown_partial = raw_partial * (10 ** shortcut_zero_count)
+            notes.append(f'Получили {raw_partial}. Приписываем справа {_v301_trailing_zero_phrase(shortcut_zero_count)}: {shown_partial}.')
     return notes[:20]
 
 
@@ -15544,15 +15576,38 @@ def _v301_division_notes(a: str, b: str) -> list[str]:
     return notes[:20]
 
 
+def _v301_column_result_note(a: str, op: str, b: str) -> str:
+    shown = _v301_display_operator(op)
+    answer = str(_v301_compute_operation_answer(a, shown, b) or '').strip()
+    if not answer:
+        return ''
+    if shown == '+':
+        return f'Получили сумму {answer}.'
+    if shown == '-':
+        return f'Получили разность {answer}.'
+    if shown == '×':
+        return f'Получили произведение {answer}.'
+    if 'остаток' in answer.lower():
+        return f'Получили результат деления: {answer}.'
+    return f'Получили частное {answer}.'
+
+
 def _v301_column_notes(a: str, op: str, b: str) -> list[str]:
     shown = _v301_display_operator(op)
     if shown == '+':
-        return _v301_addition_notes(a, b)
-    if shown == '-':
-        return _v301_subtraction_notes(a, b)
-    if shown == '×':
-        return _v301_multiplication_notes(a, b)
-    return _v301_division_notes(a, b)
+        notes = _v301_addition_notes(a, b)
+    elif shown == '-':
+        notes = _v301_subtraction_notes(a, b)
+    elif shown == '×':
+        notes = _v301_multiplication_notes(a, b)
+    else:
+        notes = _v301_division_notes(a, b)
+    final_note = _v301_column_result_note(a, shown, b)
+    if final_note:
+        normalized = final_note.lower().strip()
+        notes = [line for line in notes if str(line or '').lower().strip() != normalized]
+        notes.append(final_note)
+    return notes
 
 
 def _v301_is_pure_direct_operation_text(text: str) -> bool:
