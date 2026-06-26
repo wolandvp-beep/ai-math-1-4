@@ -1,5 +1,5 @@
 (() => {
-  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v530_04_v50103_excel_2101_2200";
+  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v530_05_v50103_excel_2101_2200";
   // src/i18n/ru.js
   var ru = {
     "app.name": "\u041C\u0430\u0442\u0435\u043C\u0430\u0442\u0438\u0447\u043A\u0430",
@@ -1095,7 +1095,7 @@
     DEFAULT_LANGUAGE: "ru",
     ENABLE_DEMO_FALLBACK: true
   };
-  var EXPECTED_BACKEND_RELEASE = "v530_04_v50103_excel_2101_2200";
+  var EXPECTED_BACKEND_RELEASE = "v530_05_v50103_excel_2101_2200";
 
   // src/storage/installIdStorage.js
   var KEY5 = "matematichka_install_id";
@@ -2306,6 +2306,8 @@
     const multiplierDigits = multiplier.split("");
     const trailingZeroMatch = multiplier.length > 1 ? multiplier.match(/0+$/) : null;
     const trailingZeroCount = trailingZeroMatch ? trailingZeroMatch[0].length : 0;
+    const multiplierWithoutTrailingZeroes = trailingZeroCount ? multiplier.slice(0, multiplier.length - trailingZeroCount) || "0" : multiplier;
+    const trailingZeroEndingText = trailingZeroCount === 2 ? "двумя нулями" : trailingZeroCount === 3 ? "тремя нулями" : trailingZeroCount === 4 ? "четырьмя нулями" : `${trailingZeroCount} нулями`;
     for (let rowIndex = multiplierDigits.length - 1; rowIndex >= 0; rowIndex -= 1) {
       const digit = Number(multiplierDigits[rowIndex]);
       const shift = multiplierDigits.length - 1 - rowIndex;
@@ -2314,16 +2316,14 @@
         if (trailingZeroCount && rowIndex >= multiplierDigits.length - trailingZeroCount) {
           if (rowIndex === multiplierDigits.length - 1) {
             if (trailingZeroCount === 1) {
-              notes.push(makeNote("В конце второго множителя стоит 0: он даёт сдвиг на 1 разряд, поэтому нулевое неполное произведение не записываем отдельно.", color));
+              notes.push(makeNote(`Второй множитель оканчивается нулём: умножаем на ${multiplierWithoutTrailingZeroes}, а 0 приписываем справа.`, color));
             } else {
-              const zeroWord = trailingZeroCount >= 2 && trailingZeroCount <= 4 ? "нуля" : "нулей";
-              const rankWord = trailingZeroCount >= 2 && trailingZeroCount <= 4 ? "разряда" : "разрядов";
-              notes.push(makeNote(`В конце второго множителя ${trailingZeroCount} ${zeroWord}: они дают сдвиг на ${trailingZeroCount} ${rankWord}, поэтому нулевые неполные произведения не записываем отдельно.`, color));
+              notes.push(makeNote(`Второй множитель оканчивается ${trailingZeroEndingText}: умножаем на ${multiplierWithoutTrailingZeroes}, а эти нули приписываем справа.`, color));
             }
           }
           continue;
         }
-        notes.push(makeNote("Во втором множителе в этом разряде стоит 0: нулевое неполное произведение не записываем отдельно.", color));
+        notes.push(makeNote("В этом разряде второго множителя стоит 0, поэтому отдельную строку с нулями не пишем.", color));
         continue;
       }
       const rowDigits = multiplicand.split("");
@@ -3638,12 +3638,12 @@
   }
   function extractV312TextProblemSolutionOperations(taskText, explanationText) {
     if (!looksLikeV312TextProblemAuditTask(taskText)) return [];
-    const lines = String(explanationText || "").replace(/\r/g, "").split(/\n+/).map((line) => line.trim()).filter(Boolean).filter((line) => !isEquationColumnRenderedDuplicateLine(line));
+    const lines = String(explanationText || "").replace(/\r/g, "").split(/\n+/).map((line) => line.trim()).filter(Boolean).filter((line) => !isEquationColumnRenderedDuplicateLine(line) && !looksLikeColumnVisualArtifactLine(line));
     return dedupeOperations(lines.flatMap((line) => extractOperationsFromSolutionLine(line))).slice(0, 16);
   }
   function extractGeometrySolutionOperations(taskText, explanationText) {
     if (!looksLikeGeometryTaskText(taskText)) return [];
-    const lines = String(explanationText || "").replace(/\r/g, "").split(/\n+/).map((line) => line.trim()).filter(Boolean).filter((line) => !isEquationColumnRenderedDuplicateLine(line));
+    const lines = String(explanationText || "").replace(/\r/g, "").split(/\n+/).map((line) => line.trim()).filter(Boolean).filter((line) => !isEquationColumnRenderedDuplicateLine(line) && !looksLikeColumnVisualArtifactLine(line));
     return dedupeOperations(lines.flatMap((line) => extractOperationsFromSolutionLine(line))).slice(0, 16);
   }
   function looksLikeInformationWorkTaskText(taskText) {
@@ -3652,7 +3652,7 @@
   }
   function extractInformationWorkSolutionOperations(taskText, explanationText) {
     if (!looksLikeInformationWorkTaskText(taskText)) return [];
-    const lines = String(explanationText || "").replace(/\r/g, "").split(/\n+/).map((line) => line.trim()).filter(Boolean).filter((line) => !isEquationColumnRenderedDuplicateLine(line));
+    const lines = String(explanationText || "").replace(/\r/g, "").split(/\n+/).map((line) => line.trim()).filter(Boolean).filter((line) => !isEquationColumnRenderedDuplicateLine(line) && !looksLikeColumnVisualArtifactLine(line));
     return dedupeOperations(lines.flatMap((line) => extractOperationsFromSolutionLine(line))).slice(0, 16);
   }
 
@@ -3697,7 +3697,7 @@
         .replace(/\r/g, "")
         .split(/\n+/)
         .map((line) => String(line || "").trim())
-        .filter((line) => line && !isEquationColumnRenderedDuplicateLine(line))
+        .filter((line) => line && !isEquationColumnRenderedDuplicateLine(line) && !looksLikeColumnVisualArtifactLine(line))
         .join("\n");
       const equationStepOperations = extractStepHeaderOperations(equationSourceText);
       if (equationStepOperations.length) {
@@ -3938,6 +3938,8 @@
       || /^первое\s+число\s+меньше\s+второго/.test(value)
       || /^умножаем\s+\d+\s+на\s+\d+/.test(value)
       || /^(?:в\s+конце\s+второго\s+множителя|во\s+втором\s+множителе\s+в\s+этом\s+разряде).*нулевое\s+неполное\s+произведение/.test(value)
+      || /^второй\s+множитель\s+оканчивается/.test(value)
+      || /^в\s+этом\s+разряде\s+второго\s+множителя\s+стоит\s+0/.test(value)
       || /^оставшийся\s+перенос\s+\d+\s+дописываем/.test(value)
       || /^определяем\s+первое\s+неполное\s+делимое/.test(value)
       || /^подобрали\s+первое\s+неполное\s+делимое/.test(value)
@@ -3956,6 +3958,45 @@
   }
   function isAnyColumnRenderedDuplicateLine(text) {
     return isEquationColumnRenderedDuplicateLine(text);
+  }
+  function looksLikeColumnVisualArtifactLine(text, loose = false) {
+    const trimmed = String(text || "").trim();
+    if (!trimmed) return false;
+    const normalized = trimmed.replace(/[.,;]+$/g, "").replace(/\s+/g, " ").trim();
+    if (!normalized || /=/.test(normalized) || /[A-Za-zА-Яа-яЁё]/.test(normalized)) return false;
+    const compact = normalized.replace(/\s+/g, "");
+    if (!/\d/.test(compact)) return false;
+    if (!/^[+\-−–—×xXхХ*·:÷\/\d.]+$/.test(compact)) return false;
+    const startsWithColumnSign = /^[+\-−–—×xXхХ*·]/.test(compact);
+    const hasSpacedDigits = /\d\s+\d/.test(normalized);
+    const isLooseSingleNumber = loose && /^\d+$/.test(compact);
+    return startsWithColumnSign || hasSpacedDigits || isLooseSingleNumber;
+  }
+  function isColumnRenderedDuplicateOrArtifactLine(text) {
+    return isAnyColumnRenderedDuplicateLine(text) || looksLikeColumnVisualArtifactLine(text, true);
+  }
+  function filterColumnRenderedDuplicateRuns(lines) {
+    const kept = [];
+    let inColumnDuplicateRun = false;
+    (Array.isArray(lines) ? lines : []).forEach((line) => {
+      const trimmed = String(line || "").trim();
+      if (!trimmed) return;
+      if (isColumnMethodTitleLine(trimmed)) {
+        inColumnDuplicateRun = true;
+        return;
+      }
+      if (inColumnDuplicateRun) {
+        if (isColumnNotesHeadingLine(trimmed) || isGeneratedColumnExplanationLine(trimmed) || looksLikeColumnVisualArtifactLine(trimmed, true)) {
+          return;
+        }
+        if (!isFlowBoundaryLine(trimmed)) {
+          return;
+        }
+        inColumnDuplicateRun = false;
+      }
+      kept.push(line);
+    });
+    return kept;
   }
   function filterColumnNoteItems(noteItems) {
     const seen = /* @__PURE__ */ new Set();
@@ -4498,13 +4539,14 @@
     }
     const cleanupPrimaryOperation = kind === "word" && (looksLikeV312TextProblemAuditTask(taskText) || looksLikeInformationWorkTaskText(taskText)) || kind === "geometry" ? null : primaryOperation;
     let bodyLines = kind === "expression" && operations.length > 1 ? ensureFullExpressionSolutionBeforeAnswer(parsed.bodyLines, taskText, operations) : cleanGenericBodyLines(parsed.bodyLines, kind, cleanupPrimaryOperation);
+    bodyLines = filterColumnRenderedDuplicateRuns(bodyLines);
     if (kind === "equation") {
       bodyLines = bodyLines
         .map((line) => String(line || "").replace(/^\d+\)\s*/, "").replace(/Проверка:\s*\.$/i, "Проверка:").trim())
         .filter((line) => Boolean(line) && !isEquationColumnRenderedDuplicateLine(line));
     }
     if (kind === "word" && looksLikeV312TextProblemAuditTask(taskText)) {
-      bodyLines = bodyLines.filter((line) => Boolean(String(line || "").trim()) && !isAnyColumnRenderedDuplicateLine(line));
+      bodyLines = bodyLines.filter((line) => Boolean(String(line || "").trim()) && !isAnyColumnRenderedDuplicateLine(line) && !looksLikeColumnVisualArtifactLine(line));
     }
     const metaLines = [];
     if (kind === "equation" && parsed.checkLine) {
@@ -6065,7 +6107,7 @@
             lineCursor += 1;
             continue;
           }
-          if (isAnyColumnRenderedDuplicateLine(lookaheadText)) {
+          if (isColumnRenderedDuplicateOrArtifactLine(lookaheadText)) {
             lineCursor += 1;
             continue;
           }
@@ -9482,8 +9524,8 @@
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const normBase = (value) => String(value || "").trim().replace(/\/+$/g, "");
       const backendBase = normBase(params.get("backendBaseUrl") || params.get("backend") || REMOTE_EXPLAIN_PROXY_URL.replace(/\/api\/explain.*$/i, ""));
-      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v530_04_v50103_excel_2101_2200");
-      const auditKey = String(params.get("auditKey") || params.get("key") || "v530-04-live-audit");
+      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v530_05_v50103_excel_2101_2200");
+      const auditKey = String(params.get("auditKey") || params.get("key") || "v530-05-live-audit");
       const auditSection = String(params.get("section") || params.get("auditSection") || "excel_numeric_regression");
       const auditOffset = String(params.get("offset") || "2100");
       const auditLimit = String(params.get("limit") || "100");
