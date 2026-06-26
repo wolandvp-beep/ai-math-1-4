@@ -1,5 +1,5 @@
 (() => {
-  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v531_v50103_excel_2201_2300";
+  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v531_01_v50103_excel_2201_2300";
   // src/i18n/ru.js
   var ru = {
     "app.name": "\u041C\u0430\u0442\u0435\u043C\u0430\u0442\u0438\u0447\u043A\u0430",
@@ -275,6 +275,10 @@
       return items;
     }
     const cleanNumbered = numbered.map((index) => String(items[index] || "").replace(/^\s*\d+\)\s*/, "").trim());
+    const hasUnitConversionStep = cleanNumbered.some((line) => /^\d+(?:\s*[а-яёa-z²³.]+)+(?:\s+\d+\s*[а-яёa-z²³.]+)*\s*=\s*\d+\s*[а-яёa-z²³.]+/i.test(String(line || "")));
+    if (hasUnitConversionStep) {
+      return items;
+    }
     const direct = cleanNumbered.filter(lineHasDirectResult);
     if (direct.length === 1) {
       if (verdictLikeAnswer) {
@@ -1095,7 +1099,7 @@
     DEFAULT_LANGUAGE: "ru",
     ENABLE_DEMO_FALLBACK: true
   };
-  var EXPECTED_BACKEND_RELEASE = "v531_v50103_excel_2201_2300";
+  var EXPECTED_BACKEND_RELEASE = "v531_01_v50103_excel_2201_2300";
 
   // src/storage/installIdStorage.js
   var KEY5 = "matematichka_install_id";
@@ -1891,7 +1895,7 @@
     }
     return `
     <ol class="column-notes-list">
-      ${trimNotes(visibleNoteItems).map((note) => {
+      ${trimNotes(visibleNoteItems, 32).map((note) => {
       const style = note.color ? ` style="--note-accent:${note.color};"` : "";
       const attrs = typeof note.lineIndex === "number" ? ` data-result-line-index="${note.lineIndex}"` : "";
       return `<li class="column-note"${style}${attrs}>${escapeHtml(note.text)}</li>`;
@@ -2123,10 +2127,10 @@
         normalized.push({ ...note, text: `\u041F\u043E\u043B\u0443\u0447\u0430\u0435\u043C \u043E\u0441\u0442\u0430\u0442\u043E\u043A ${remainder}. \u041E\u043D \u043C\u0435\u043D\u044C\u0448\u0435 \u0434\u0435\u043B\u0438\u0442\u0435\u043B\u044F, \u0437\u043D\u0430\u0447\u0438\u0442 \u0434\u0435\u043B\u0435\u043D\u0438\u0435 \u0437\u0430\u043A\u043E\u043D\u0447\u0435\u043D\u043E.` });
       }
     });
-    return trimNotes(normalized, 20);
+    return trimNotes(normalized, 32);
   }
   function normalizeTeachingNotes(notes, operator, operation = null) {
-    const source = trimNotes(notes).map((note) => ({ ...note }));
+    const source = trimNotes(notes, 32).map((note) => ({ ...note }));
     const normalizeMappedNotes = (formatter) => source.map((note) => ({ ...note, text: formatter(note.text) })).filter((note) => String(note.text || "").trim());
     if (operator === "+") {
       return normalizeMappedNotes(normalizeAdditionNoteText);
@@ -2263,6 +2267,8 @@
         } else {
           notes.push(makeNote(`${topDigit} - 1 = ${stepValue}`, color));
         }
+      } else if (originalTopDigits[index] && resultDigits[index] && Number(resultDigits[index]) === topDigit && topDigit !== 0) {
+        notes.push(makeNote(`В старшем разряде ничего не вычитаем, сносим ${topDigit}.`, color));
       }
       borrowIn = borrowOut;
     }
@@ -2297,33 +2303,55 @@
     `
     };
   }
+  function multiplicationOrdinal(index) {
+    const ordinals = ["первое", "второе", "третье", "четвёртое", "пятое", "шестое", "седьмое", "восьмое", "девятое"];
+    return ordinals[index] || `${index + 1}-е`;
+  }
+  function multiplicationRankText(shift) {
+    if (shift === 0) return "";
+    if (shift === 1) return "десятков";
+    if (shift === 2) return "сотен";
+    if (shift === 3) return "тысяч";
+    if (shift === 4) return "десятков тысяч";
+    if (shift === 5) return "сотен тысяч";
+    return `разряда с ${shift} нулями`;
+  }
+  function multiplicationPlaceText(positionFromRight) {
+    const places = ["единицы", "десятки", "сотни", "тысячи", "десятки тысяч", "сотни тысяч"];
+    return places[positionFromRight] || `разряд ${positionFromRight + 1}`;
+  }
+  function chooseColumnMultiplicationFactors(a, b) {
+    let top = String(a);
+    let bottom = String(b);
+    const shouldSwap = top.length < bottom.length || top.length === bottom.length && Number(top) < Number(bottom);
+    if (shouldSwap) {
+      [top, bottom] = [bottom, top];
+    }
+    return { top, bottom, swapped: shouldSwap };
+  }
   function buildMultiplicationModel(a, b) {
-    const multiplicand = String(a);
-    const multiplier = String(b);
-    const result = String(Number(a) * Number(b));
+    const { top: multiplicand, bottom: multiplier } = chooseColumnMultiplicationFactors(a, b);
+    const result = String(Number(multiplicand) * Number(multiplier));
     const partials = [];
     const notes = [];
     const multiplierDigits = multiplier.split("");
     const trailingZeroMatch = multiplier.length > 1 ? multiplier.match(/0+$/) : null;
     const trailingZeroCount = trailingZeroMatch ? trailingZeroMatch[0].length : 0;
     const multiplierWithoutTrailingZeroes = trailingZeroCount ? multiplier.slice(0, multiplier.length - trailingZeroCount) || "0" : multiplier;
-    const trailingZeroEndingText = trailingZeroCount === 2 ? "двумя нулями" : trailingZeroCount === 3 ? "тремя нулями" : trailingZeroCount === 4 ? "четырьмя нулями" : `${trailingZeroCount} нулями`;
+    const trailingZeroEndingText = trailingZeroCount === 1 ? "нулём" : trailingZeroCount === 2 ? "двумя нулями" : trailingZeroCount === 3 ? "тремя нулями" : trailingZeroCount === 4 ? "четырьмя нулями" : `${trailingZeroCount} нулями`;
+    let visiblePartialIndex = 0;
     for (let rowIndex = multiplierDigits.length - 1; rowIndex >= 0; rowIndex -= 1) {
       const digit = Number(multiplierDigits[rowIndex]);
       const shift = multiplierDigits.length - 1 - rowIndex;
-      const color = getStepColor(shift);
+      const color = getStepColor(visiblePartialIndex);
       if (digit === 0 && multiplierDigits.length > 1) {
         if (trailingZeroCount && rowIndex >= multiplierDigits.length - trailingZeroCount) {
           if (rowIndex === multiplierDigits.length - 1) {
-            if (trailingZeroCount === 1) {
-              notes.push(makeNote(`Второй множитель оканчивается нулём: умножаем на ${multiplierWithoutTrailingZeroes}, а 0 приписываем справа.`, color));
-            } else {
-              notes.push(makeNote(`Второй множитель оканчивается ${trailingZeroEndingText}: умножаем на ${multiplierWithoutTrailingZeroes}, а эти нули приписываем справа.`, color));
-            }
+            notes.push(makeNote(`Второй множитель оканчивается ${trailingZeroEndingText}: сначала умножаем на ${multiplierWithoutTrailingZeroes}, потом приписываем ${"0".repeat(trailingZeroCount)} справа.`, color));
           }
           continue;
         }
-        notes.push(makeNote("В этом разряде второго множителя стоит 0, поэтому отдельную строку с нулями не пишем.", color));
+        notes.push(makeNote("Во втором множителе есть 0: при умножении на него получится строка нулей, её не записываем.", color));
         continue;
       }
       const rowDigits = multiplicand.split("");
@@ -2331,22 +2359,36 @@
       for (let index = rowDigits.length - 1; index >= 0; index -= 1) {
         const aDigit = Number(rowDigits[index]);
         const carryIn = carry;
-        const product = aDigit * digit + carryIn;
+        const product = digit * aDigit + carryIn;
         const written = product % 10;
         carry = Math.floor(product / 10);
-        notes.push(makeNote(`${aDigit} × ${digit}${carryIn ? ` + ${carryIn}` : ""} = ${product}`, color));
-        if (carry) {
-          notes.push(makeNote(`${written} пишем, ${carry} переносим`, color));
+        const placeText = multiplicationPlaceText(rowDigits.length - 1 - index);
+        notes.push(makeNote(`Умножаем ${digit} на ${aDigit} (${placeText})${carryIn ? ` и прибавляем ${carryIn}` : ""}: получаем ${product}.`, color));
+        if (carry && index > 0) {
+          notes.push(makeNote(`Пишем ${written}, ${carry} переносим в следующий разряд.`, color));
+        } else if (carry) {
+          notes.push(makeNote(`Пишем ${written}, ${carry} дописываем слева.`, color));
         }
       }
-      if (carry) {
-        notes.push(makeNote(`${carry} дописываем слева`, color));
-      }
       const rawPartial = Number(multiplicand) * digit;
+      const shownPartial = rawPartial * 10 ** shift;
+      const ordinal = multiplicationOrdinal(visiblePartialIndex);
+      const rankText = multiplicationRankText(shift);
+      if (shift > 0) {
+        notes.push(makeNote(`Получили ${ordinal} неполное произведение: ${rawPartial} ${rankText}, то есть ${shownPartial}.`, color));
+      } else if (multiplierDigits.length > 1) {
+        notes.push(makeNote(`Получили ${ordinal} неполное произведение: ${rawPartial}.`, color));
+      }
       partials.push({ value: String(rawPartial), shift, color });
+      visiblePartialIndex += 1;
     }
     if (!partials.length) {
       partials.push({ value: "0", shift: 0, color: getStepColor(0) });
+      notes.push(makeNote("Один из множителей равен 0, поэтому произведение равно 0.", getStepColor(0)));
+    }
+    const shiftedPartials = partials.map((partial) => Number(partial.value) * 10 ** Number(partial.shift || 0));
+    if (shiftedPartials.length > 1) {
+      notes.push(makeNote(`Складываем неполные произведения: ${shiftedPartials.join(" + ")} = ${result}.`, getStepColor(shiftedPartials.length)));
     }
     const width = Math.max(
       result.length,
@@ -2407,6 +2449,7 @@
     `
     };
   }
+
   function buildDivisionSteps(dividendText, divisorNumber) {
     const digits = dividendText.split("").map(Number);
     const steps = [];
@@ -3934,11 +3977,15 @@
     return /^(?:складываем|вычитаем|умножаем)\s+в\s+этом\s+разряде\s*:/.test(value)
       || /^пишем\s+\d+[, ]/.test(value) && /переносим/.test(value)
       || /^после\s+предыдущего\s+займа\s+в\s+этом\s+разряде/.test(value)
+      || /^в\s+старшем\s+разряде\s+ничего\s+не\s+вычитаем/.test(value)
       || /^\d+\s+меньше\s+\d+[, ]/.test(value) && /занимаем\s+1/.test(value)
       || /^первое\s+число\s+меньше\s+второго/.test(value)
       || /^умножаем\s+\d+\s+на\s+\d+/.test(value)
+      || /^получили\s+.+неполное\s+произведение/.test(value)
+      || /^складываем\s+неполные\s+произведения/.test(value)
       || /^(?:в\s+конце\s+второго\s+множителя|во\s+втором\s+множителе\s+в\s+этом\s+разряде).*нулевое\s+неполное\s+произведение/.test(value)
       || /^второй\s+множитель\s+оканчивается/.test(value)
+      || /^во\s+втором\s+множителе\s+есть\s+0/.test(value)
       || /^в\s+этом\s+разряде\s+второго\s+множителя\s+стоит\s+0/.test(value)
       || /^оставшийся\s+перенос\s+\d+\s+дописываем/.test(value)
       || /^определяем\s+первое\s+неполное\s+делимое/.test(value)
@@ -3999,13 +4046,9 @@
     return kept;
   }
   function filterColumnNoteItems(noteItems) {
-    const seen = /* @__PURE__ */ new Set();
     return (Array.isArray(noteItems) ? noteItems : []).filter((note) => {
       const text = String(note?.text || "").trim();
       if (!text || isColumnMethodTitleLine(text) || isColumnNotesHeadingLine(text)) return false;
-      const key = normalizeColumnRenderDuplicateKey(text);
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
       return true;
     });
   }
@@ -6171,7 +6214,7 @@
     const orderGuideBlock = buildOrderGuideBlock(taskText, operations, orderGuideRefs);
     const blocks = models.map(({ operation, model }) => {
       const titleLineIndex = nextLineIndex++;
-      const noteItems = trimNotes(model.notes || [], 20).map((note) => ({ ...note, lineIndex: nextLineIndex++ }));
+      const noteItems = trimNotes(model.notes || [], 32).map((note) => ({ ...note, lineIndex: nextLineIndex++ }));
       return {
         ...model,
         operation,
@@ -9524,8 +9567,8 @@
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const normBase = (value) => String(value || "").trim().replace(/\/+$/g, "");
       const backendBase = normBase(params.get("backendBaseUrl") || params.get("backend") || REMOTE_EXPLAIN_PROXY_URL.replace(/\/api\/explain.*$/i, ""));
-      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v531_v50103_excel_2201_2300");
-      const auditKey = String(params.get("auditKey") || params.get("key") || "v531-live-audit");
+      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v531_01_v50103_excel_2201_2300");
+      const auditKey = String(params.get("auditKey") || params.get("key") || "v531-01-live-audit");
       const auditSection = String(params.get("section") || params.get("auditSection") || "excel_numeric_regression");
       const auditOffset = String(params.get("offset") || "2200");
       const auditLimit = String(params.get("limit") || "100");
