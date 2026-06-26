@@ -187,7 +187,7 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('offset', '2200'),
         ('limit', '100'),
         ('autoStart', '1'),
-        ('cacheBust', 'v531-01-v50103-excel-2201-2300'),
+        ('cacheBust', 'v531-02-v50103-excel-2201-2300'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -265,7 +265,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v531-01-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v531-02-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3789,7 +3789,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v531-01-v50103-excel-2201-2300-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v531-02-v50103-excel-2201-2300-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -4426,9 +4426,11 @@ def _live_audit_count_arithmetic_actions_in_step(step: Any) -> int:
 
 def _live_audit_step_has_direct_result(step: Any) -> bool:
     clean = str(step or '').strip()
-    if re.search(r'\d+\s*[+\-−]\s*\d+\s*=\s*-?\d+\b', clean):
+    if re.search(r'\d+\s*[+\-−×*/:÷·]\s*\d+\s*=\s*-?\d+\b', clean):
         return True
     if re.search(r'[xх]\s*=\s*-?\d+\b', clean, flags=re.IGNORECASE):
+        return True
+    if re.search(r'\b\d+\s*(?:км|м|дм|см|мм|т|кг|г|л|ч|мин|с|дн|д|мес)\.?\s*=\s*\d+\b', clean, flags=re.IGNORECASE):
         return True
     if re.search(r'\b\d+\s*=\s*\d+\b', clean):
         return True
@@ -4440,9 +4442,26 @@ def _live_audit_answer_is_multistep_marker(result_text: Any) -> bool:
     return answer in {'верно', 'неверно', '=', '<', '>', 'да', 'нет'}
 
 
+def _live_audit_expand_embedded_numbered_lines(lines: list[str]) -> list[str]:
+    expanded: list[str] = []
+    for line in lines:
+        source = str(line or '').strip()
+        if not source:
+            continue
+        parts = re.split(r'(?=\s+\d+\)\s+)', source)
+        if len(parts) <= 1:
+            expanded.append(source)
+            continue
+        for part in parts:
+            clean = part.strip()
+            if clean:
+                expanded.append(clean)
+    return expanded
+
+
 def _live_audit_single_step_numbering_issues(result_text: Any, prefix: str) -> list[str]:
     """V300/V297 shared UI rule: one-operation examples must not be displayed as numbered action lists."""
-    body = _live_audit_solution_body_lines(result_text)
+    body = _live_audit_expand_embedded_numbered_lines(_live_audit_solution_body_lines(result_text))
     numbered = [line for line in body if re.match(r'^\s*\d+\)\s*\S+', line)]
     if any(re.match(r'^\s*[2-9]\d*\)\s*\S+', line) for line in body) and not any(re.match(r'^\s*1\)\s*\S+', line) for line in body):
         return [prefix + ': multi-step numbering is missing step 1)']
@@ -4451,6 +4470,10 @@ def _live_audit_single_step_numbering_issues(result_text: Any, prefix: str) -> l
 
     clean_numbered = [re.sub(r'^\s*\d+\)\s*', '', line).strip() for line in numbered]
     direct_steps = [line for line in clean_numbered if _live_audit_step_has_direct_result(line)]
+    if len(numbered) >= 2 and len(direct_steps) >= 2:
+        # Unit-conversion geometry/measure tasks may be rendered as separate
+        # numbered lines even when the final formula is one multiplication.
+        return []
 
     if len(numbered) == 1 and re.match(r'^\s*1\)\s*\S+', numbered[0]):
         step_without_marker = clean_numbered[0]
@@ -12967,7 +12990,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v531-01-v50103-excel-2201-2300'),
+        ('cacheBust', 'v531-02-v50103-excel-2201-2300'),
     ])
     return {
         **summary,
@@ -14935,7 +14958,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v531-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v531-02-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -15282,7 +15305,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v531-01-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v531-02-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:

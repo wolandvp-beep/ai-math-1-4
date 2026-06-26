@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v531_01_v50103_excel_2201_2300'
-SOLVER_VERSION = 'v531-01-v50103-excel-2201-2300'
+APP_RELEASE = 'v531_02_v50103_excel_2201_2300'
+SOLVER_VERSION = 'v531-02-v50103-excel-2201-2300'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -516,9 +516,11 @@ def _step_has_direct_result(step: str) -> bool:
     clean = str(step or '').strip()
     if not clean:
         return False
-    if re.search(r'\d+\s*[+\-−]\s*\d+\s*=\s*-?\d+\b', clean):
+    if re.search(r'\d+\s*[+\-−×*/:÷·]\s*\d+\s*=\s*-?\d+\b', clean):
         return True
     if re.search(r'[xх]\s*=\s*-?\d+\b', clean, flags=re.IGNORECASE):
+        return True
+    if re.search(r'\b\d+\s*(?:км|м|дм|см|мм|т|кг|г|л|ч|мин|с|дн|д|мес)\.?\s*=\s*\d+\b', clean, flags=re.IGNORECASE):
         return True
     if re.search(r'\b\d+\s*=\s*\d+\b', clean):
         return True
