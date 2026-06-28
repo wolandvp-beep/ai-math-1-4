@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v531_04_v50103_excel_2201_2300'
-SOLVER_VERSION = 'v531-04-v50103-excel-2201-2300'
+APP_RELEASE = 'v531_05_v50103_excel_2201_2300'
+SOLVER_VERSION = 'v531-05-v50103-excel-2201-2300'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -13536,7 +13536,7 @@ async def _generate_deepseek_primary_response(payload: str, *, allow_external: b
     # downgrade a normal audit row to local fallback.  Retry the full primary
     # API pipeline a few times; if any attempt produces a verified result, that
     # result remains the locked source of truth for number and actions.
-    for _deepseek_primary_attempt in range(3):
+    for _deepseek_primary_attempt in range(int(os.environ.get('DEEPSEEK_PRIMARY_MAX_ATTEMPTS') or '5')):
         try:
             candidate_payload = await _call_deepseek_primary(payload)
         except Exception as exc:
