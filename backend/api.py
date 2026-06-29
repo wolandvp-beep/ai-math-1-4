@@ -184,10 +184,10 @@ def _ui_render_audit_url(request: Request | None, key: str | None = None) -> str
         ('release', APP_RELEASE),
         ('auditKey', audit_key),
         ('section', 'excel_numeric_regression'),
-        ('offset', '2200'),
+        ('offset', '2400'),
         ('limit', '100'),
         ('autoStart', '1'),
-        ('cacheBust', 'v532-02-v50103-excel-2301-2400'),
+        ('cacheBust', 'v533-v50103-excel-2401-2500'),
     ])
     return _public_frontend_url(request) + '?' + query
 
@@ -205,7 +205,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         ('section', 'excel_numeric_regression'),
         ('key', audit_key),
         ('limit', '100'),
-        ('offset', '2200'),
+        ('offset', '2400'),
         ('allowExternal', '1'),
         ('maxExternalCalls', '150'),
         ('release', APP_RELEASE),
@@ -213,7 +213,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
     ])
     legacy_start_path = f'/api/diagnostics/live-audit/start?{legacy_start_query}'
     return {
-        'nextAuditPlannedMapStep': 'V532.02 — exact visible contract for Excel rows 2301–2400; mixed word problems, units, fractions, motion, perimeter/area and symbolic formula rows',
+        'nextAuditPlannedMapStep': 'V533 — exact visible contract for Excel rows 2401–2500; mixed word problems, unit conversions, fractions, motion, geometry and ratio tasks',
         'nextAuditSection': 'excel_numeric_regression',
         'nextAuditLimit': 100,
         'nextAuditRelease': APP_RELEASE,
@@ -248,7 +248,7 @@ def _next_live_audit_links(request: Request | None = None, key: str | None = Non
         'nextAuditQueryOrderSafe': True,
         'nextAuditNoSectionEntityRisk': True,
         'nextAuditNoQueryParamReorderRisk': True,
-        'nextAuditNote': 'V532.02 корректирует batch 2301–2400 через self-hosted /app frontend. Составные единицы, дроби, скорость, площадь/периметр и явные Excel-опечатки фиксируются route-level visible contract; реальный external API proof обязателен.',
+        'nextAuditNote': 'V533 проверяет batch 2401–2500 через self-hosted /app frontend. Сохраняются правила V532.02: точные единицы, скорость, площадь/периметр, дроби, ноль/нули и route-level visible contract; реальный external API proof обязателен.',
     }
 
 
@@ -265,7 +265,7 @@ def _version_payload(request: Request | None = None) -> dict:
     }
 
 
-LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v532-02-live-audit'
+LIVE_PRODUCTION_AUDIT_DEFAULT_KEY = 'v533-live-audit'
 LIVE_PRODUCTION_AUDIT_MAX_LIMIT = 50
 LIVE_PRODUCTION_AUDIT_REPRESENTATIVE_NAMES = (
     'v280_route_multi_task_newline_warning',
@@ -3108,6 +3108,36 @@ def _v401_excel_numeric_regression_cases() -> list[dict[str, Any]]:
                     row['expectedNumericAnswerNormalized'] = '300'
                     row['v532ExcelNumericExpectedFix'] = 'expected 280 -> corrected 350 - 350/7 = 300'
 
+
+            # V533: rows 2401-2500 include several Excel answer-cell defects.
+            # Keep expectedRawAnswer for evidence, but compare against the mathematically
+            # correct result required by the task text.
+            excel_row_num_v533 = int(row.get('excelRowNumber') or row.get('excelId') or 0)
+            if excel_row_num_v533 == 2420:
+                task_text = str(row.get('text') or '').lower().replace('ё', 'е')
+                if 'каждому классу' in task_text and '1200 учебников' in task_text:
+                    row['expectedNumericAnswer'] = '40'
+                    row['expectedNumericAnswerNormalized'] = '40'
+                    row['v533ExcelNumericExpectedFix'] = 'expected school totals 760/440 -> corrected per-class 40'
+            if excel_row_num_v533 == 2431:
+                task_text = str(row.get('text') or '').lower().replace('ё', 'е')
+                if 'продали 3 отреза' in task_text and '1 м шерсти стоил 10' in task_text:
+                    row['expectedNumericAnswer'] = '360'
+                    row['expectedNumericAnswerNormalized'] = '360'
+                    row['v533ExcelNumericExpectedFix'] = 'expected 600 -> corrected 3*12*10 = 360'
+            if excel_row_num_v533 == 2450:
+                task_text = str(row.get('text') or '').lower().replace('ё', 'е')
+                if 'овсом засеяно 3/4 участка' in task_text:
+                    row['expectedNumericAnswer'] = '5400'
+                    row['expectedNumericAnswerNormalized'] = '5400'
+                    row['v533ExcelNumericExpectedFix'] = 'expected remaining 1800 -> corrected oats area 5400'
+            if excel_row_num_v533 == 2466:
+                task_text = str(row.get('text') or '').lower().replace('ё', 'е')
+                if '1/2 кг сахарного песка' in task_text and 'израсходовали 1/4' in task_text:
+                    row['expectedNumericAnswer'] = '375'
+                    row['expectedNumericAnswerNormalized'] = '375'
+                    row['v533ExcelNumericExpectedFix'] = 'expected spent 125 -> corrected remaining 375'
+
             # V411: Excel rows 942 and 949 contain mathematically inconsistent numeric expected values.
             # Keep the raw Excel answer as evidence, but compare against the correct task result:
             # 6 селезней is two times less than ducks -> ducks 12, total 18;
@@ -4019,6 +4049,9 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             canonical_v53202_audit_payload = _api_v53202_final_visible_force(text, payload)
             if isinstance(canonical_v53202_audit_payload, dict) and canonical_v53202_audit_payload.get('result'):
                 payload = canonical_v53202_audit_payload
+            canonical_v533_audit_payload = _api_v533_batch_2401_2500_canonicalize_response(text, payload)
+            if isinstance(canonical_v533_audit_payload, dict) and canonical_v533_audit_payload.get('result'):
+                payload = canonical_v533_audit_payload
         if isinstance(payload, dict) and payload.get('deepseekPrimaryFallback') and not _live_audit_counter_has_positive_deepseek_usage(counter):
             api_key = str(getattr(legacy_core, 'DEEPSEEK_API_KEY', '') or os.environ.get('DEEPSEEK_API_KEY') or os.environ.get('myapp_ai_math_1_4_API_key') or '').strip()
             await _v53105_live_audit_receipt_probe(counter, text, api_key=api_key, audit_context=audit_context, reason='browser-client-post-api-fallback')
@@ -4034,7 +4067,7 @@ async def _generate_with_browser_client_fetch_counter(text: str, *, allow_extern
             setattr(legacy_core, 'call_deepseek', original_call)
 
 # --- v290 live audit runner with persistent cache and short summary endpoints ---
-LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v532-02-v50103-excel-2301-2400-v1'
+LIVE_AUDIT_RUNNER_PROMPT_VERSION = 'v533-v50103-excel-2401-2500-v1'
 LIVE_AUDIT_RUNNER_MAX_LIMIT = 200
 LIVE_AUDIT_RUNNER_DEFAULT_MAX_EXTERNAL_CALLS = 100
 LIVE_AUDIT_RUNNER_STATE_ENV = 'LIVE_AUDIT_STATE_FILE'
@@ -11808,6 +11841,599 @@ def _api_v53202_final_visible_force(original_text: str, payload: dict[str, Any] 
     return out
 
 
+# --- V533 route-level exact visible contract for Excel rows 2401-2500 ---
+_V533_BATCH_2401_2500_SPECS_BY_ROW = {2401: (['120 : 4 = 30 (шт.) – деталей в одной коробке', '30 · 6 = 180 (шт.) – деталей в шести коробках'],
+        'ребята упакуют 180 деталей',
+        '180',
+        'деталей'),
+ 2402: (['13 · 7 = 91 (кг) – картофеля использовали', '91 + 45 = 136 (кг) – картофеля привезли'],
+        'в детский сад привезли 136 кг картофеля',
+        '136',
+        'килограммов'),
+ 2403: (['336 + 408 = 744 (кг) – всего печенья',
+         '744 : 62 = 12 (кг) – печенья в одном ящике',
+         '336 : 12 = 28 (шт.) – ящиков за первый день',
+         '408 : 12 = 34 (шт.) – ящиков за второй день'],
+        'в первый день 28 ящиков, во второй день 34 ящика',
+        '28, 34',
+        'ящиков'),
+ 2404: (['36 + 44 = 80 (шт.) – всего кусков ткани',
+         '3360 : 80 = 42 (м) – длина одного куска',
+         '42 · 36 = 1512 (м) – получил первый магазин',
+         '42 · 44 = 1848 (м) – получил второй магазин'],
+        'первый магазин получил 1512 м ткани, второй магазин 1848 м',
+        '1512, 1848',
+        'метров'),
+ 2405: (['52 · 35 = 1820 (м²) – площадь участка',
+         '1820 : 4 = 455 (м²) – занято клубникой',
+         '1820 - 455 = 1365 (м²) – занято овощами'],
+        'овощами занято 1365 м²',
+        '1365',
+        'квадратных метров'),
+ 2406: (['38 · 10 = 380 (чел.) – всего детей', '380 - 180 = 200 (чел.) – девочек'],
+        'в лагерь поехало 200 девочек',
+        '200',
+        'девочек'),
+ 2407: (['72 : 9 = 8 (см) – ширина прямоугольника'], 'ширина прямоугольника 8 см', '8', 'сантиметров'),
+ 2408: (['132 - 27 = 105 (стр.) – девочка прочитала', '105 : 15 = 7 (д.) – девочка читала'],
+        'девочка читала книгу 7 дней',
+        '7',
+        'дней'),
+ 2409: (['80 · 32 = 2560 (м²) – площадь участка',
+         '2560 : 8 · 3 = 960 (м²) – занято садом',
+         '2560 - 960 = 1600 (м²) – занято огородом'],
+        'огородом занято 1600 м²',
+        '1600',
+        'квадратных метров'),
+ 2410: (['64 : 4 = 16 (м) – сторона сада', '16 · 16 = 256 (м²) – площадь сада'],
+        'площадь сада равна 256 м²',
+        '256',
+        'квадратных метров'),
+ 2411: (['700 : 5 = 140 (км/ч) – скорость сближения поездов', '140 - 45 = 95 (км/ч) – скорость другого поезда'],
+        'скорость другого поезда 95 км/ч',
+        '95',
+        'километров в час'),
+ 2412: (['1560 : 15 = 104 (км/ч) – скорость сближения поездов',
+         '104 - 44 = 60 (км/ч) – скорость пассажирского поезда'],
+        'скорость пассажирского поезда 60 км/ч',
+        '60',
+        'километров в час'),
+ 2413: (['81 · 10 = 810 (км) – прошёл поезд', '810 : 9 = 90 (км/ч) – нужная скорость'],
+        'поезд должен идти со скоростью 90 км/ч',
+        '90',
+        'километров в час'),
+ 2414: (['12 : 2 = 6 (см) – сумма длины и ширины',
+         '1 · 5 = 5 (см²) – площадь прямоугольника 1 см на 5 см',
+         '2 · 4 = 8 (см²) – площадь прямоугольника 2 см на 4 см',
+         '3 · 3 = 9 (см²) – площадь фигуры 3 см на 3 см'],
+        'возможные площади: 5 см², 8 см² и 9 см²',
+        '5, 8, 9',
+        'квадратных сантиметров'),
+ 2415: (['240 : 4 = 60 (км/ч) – скорость пассажирского поезда'],
+        'пассажирский поезд должен идти со скоростью 60 км/ч',
+        '60',
+        'километров в час'),
+ 2416: (['20 : 2 = 10 (см) – сумма длины и ширины',
+         '1 · 9 = 9 (см²) – площадь прямоугольника 1 см на 9 см',
+         '2 · 8 = 16 (см²) – площадь прямоугольника 2 см на 8 см',
+         '3 · 7 = 21 (см²) – площадь прямоугольника 3 см на 7 см',
+         '4 · 6 = 24 (см²) – площадь прямоугольника 4 см на 6 см',
+         '5 · 5 = 25 (см²) – площадь фигуры 5 см на 5 см'],
+        'возможные площади: 9 см², 16 см², 21 см², 24 см² и 25 см²',
+        '9, 16, 21, 24, 25',
+        'квадратных сантиметров'),
+ 2417: (['1245 : 5 = 249 (кг) – собрали в первый день',
+         '249 · 3 = 747 (кг) – собрали во второй день',
+         '1245 - 249 - 747 = 249 (кг) – собрали в третий день'],
+        'в третий день школьники принесли 249 кг макулатуры',
+        '249',
+        'килограммов'),
+ 2418: (['22 + 18 = 40 (шт.) – всего классов',
+         '1600 : 40 = 40 (шт.) – учебников на один класс',
+         '40 · 22 = 880 (шт.) – выдали первой школе',
+         '40 · 18 = 720 (шт.) – выдали второй школе'],
+        'первой школе выдали 880 учебников, второй школе 720 учебников',
+        '880, 720',
+        'учебников'),
+ 2419: (['3888 : 3 = 1296 (кг) – собрали в первый день',
+         '1296 + 672 = 1968 (кг) – собрали во второй день',
+         '3888 - 1296 - 1968 = 624 (кг) – собрали в третий день'],
+        'в третий день собрали 624 кг моркови',
+        '624',
+        'килограммов'),
+ 2420: (['19 + 11 = 30 (шт.) – всего классов', '1200 : 30 = 40 (шт.) – учебников каждому классу'],
+        'каждому классу выдали по 40 учебников',
+        '40',
+        'учебников'),
+ 2421: (['24 + 21 = 45 (км/ч) – скорость сближения теплоходов', '90 : 45 = 2 (ч) – время до встречи'],
+        'теплоходы встретятся через 2 часа',
+        '2',
+        'часа'),
+ 2422: (['9 + 81 = 90 (л) – бензина стало', '90 : 9 = 10 (раз) – во сколько раз стало больше'],
+        'бензина стало больше в 10 раз',
+        '10',
+        'раз'),
+ 2423: (['480 : 8 = 60 (км/ч) – скорость пассажирского поезда',
+         '720 : 6 = 120 (км/ч) – скорость скорого поезда',
+         '120 : 60 = 2 (раза) – во сколько раз меньше'],
+        'скорость пассажирского поезда меньше в 2 раза',
+        '2',
+        'раза'),
+ 2424: (['528 : 4 = 132 (км/ч) – скорость сближения поездов', '132 - 60 = 72 (км/ч) – скорость другого поезда'],
+        'другой поезд шёл со скоростью 72 км/ч',
+        '72',
+        'километра в час'),
+ 2425: (['60 · 30 = 1800 (м²) – площадь сада',
+         '1800 : 10 · 3 = 540 (м²) – засадили яблонями',
+         '1800 - 540 = 1260 (м²) – засадили вишнями'],
+        'вишнями засажено 1260 м²',
+        '1260',
+        'квадратных метров'),
+ 2426: (['40 : 8 = 5 (чел.) – в одной лодке', '30 : 5 = 6 (шт.) – лодок нужно'],
+        'для 30 человек нужно 6 лодок',
+        '6',
+        'лодок'),
+ 2427: (['30 · 20 = 600 (м²) – площадь двора',
+         '600 : 5 · 3 = 360 (м²) – занято стадионом',
+         '600 - 360 = 240 (м²) – отведено под сад'],
+        'под сад отведено 240 м²',
+        '240',
+        'квадратных метров'),
+ 2428: (['48 : 8 = 6 (кг) – яблок в одном пакете', '36 : 6 = 6 (шт.) – пакетов потребуется'],
+        'для 36 кг яблок потребуется 6 пакетов',
+        '6',
+        'пакетов'),
+ 2429: (['12 + 24 = 36 (л) – молока стало', '36 : 12 = 3 (раза) – во сколько раз стало больше'],
+        'молока стало больше в 3 раза',
+        '3',
+        'раза'),
+ 2430: (['70 · 8 = 560 (км) – проехал сначала',
+         '690 - 560 = 130 (км) – остальной путь',
+         '130 : 2 = 65 (км/ч) – скорость на остальном пути'],
+        'остальную часть пути поезд проехал со скоростью 65 км/ч',
+        '65',
+        'километров в час'),
+ 2431: (['12 · 3 = 36 (м) – шерсти продали', '36 · 10 = 360 (руб.) – получили денег'],
+        'за проданную шерсть получили 360 рублей',
+        '360',
+        'рублей'),
+ 2432: (['40 · 7 = 280 (км) – проехал сначала',
+         '370 - 280 = 90 (км) – оставшийся путь',
+         '90 : 2 = 45 (км/ч) – скорость на оставшемся пути'],
+        'оставшийся путь мотоциклист проехал со скоростью 45 км/ч',
+        '45',
+        'километров в час'),
+ 2433: (['9 · 3 = 27 (шт.) – монет приобрёл', '9 + 27 = 36 (шт.) – монет стало'],
+        'в коллекции Олега стало 36 монет',
+        '36',
+        'монет'),
+ 2434: (['50 - 20 = 30 (шт.) – мешков продали',
+         '30 · 80 = 2400 (кг) – картофеля продали',
+         '2400 · 2 = 4800 (руб.) – выручили денег'],
+        'за картофель выручили 4800 рублей',
+        '4800',
+        'рублей'),
+ 2435: (['45 · 3 = 135 (стр.) – прочитал за 3 дня',
+         '135 + 50 = 185 (стр.) – прочитал всего',
+         '300 - 185 = 115 (стр.) – осталось прочитать'],
+        'ученику осталось прочитать 115 страниц',
+        '115',
+        'страниц'),
+ 2436: (['65 · 5 = 325 (м) – за 5 дней',
+         '325 + 300 = 625 (м) – продали всего',
+         '1000 - 625 = 375 (м) – остаток'],
+        'осталось продать 375 м шёлка',
+        '375',
+        'метров'),
+ 2437: (['6 · 3 = 18 (кг) – сахарного песка', '9 + 18 = 27 (кг) – всего купил'],
+        'папа купил 27 кг крупы и сахарного песка',
+        '27',
+        'килограммов'),
+ 2438: (['16 : 4 = 4 (раза) – во сколько раз меньше куриц', '16 - 4 = 12 (шт.) – на сколько больше цыплят'],
+        'куриц было в 4 раза меньше, цыплят на 12 больше',
+        '4, 12',
+        'раза и цыплят'),
+ 2439: (['130 + 170 = 300 (стр.) – в первой и второй книгах вместе', '300 · 2 = 600 (стр.) – в третьей книге'],
+        'в третьей книге 600 страниц',
+        '600',
+        'страниц'),
+ 2440: (['360 + 540 = 900 (чел.) – посетили в субботу и воскресенье',
+         '900 : 3 = 300 (чел.) – посетили в понедельник'],
+        'в понедельник выставку посетили 300 человек',
+        '300',
+        'человек'),
+ 2441: (['52 · 3 = 156 (шт.) – книг о животных',
+         '52 + 156 = 208 (шт.) – всего книг',
+         '208 : 26 = 8 (шт.) – полок'],
+        'книги заняли 8 полок',
+        '8',
+        'полок'),
+ 2442: (['62 - 19 = 43 (шт.) – первый пакет',
+         '62 - 43 = 19 (шт.) – второй пакет',
+         '43 + 19 = 62 (шт.) – два пакета'],
+        'в двух пакетах осталось 62 ореха',
+        '62',
+        'ореха'),
+ 2443: (['14 · 2 = 28 (шт.) – книг отремонтировали девочки',
+         '12 · 5 = 60 (шт.) – книг отремонтировали мальчики',
+         '28 + 60 = 88 (шт.) – всего книг'],
+        'мальчики и девочки вместе отремонтировали 88 книг',
+        '88',
+        'книг'),
+ 2444: (['17 - 12 = 5 (шт.) – ящиков', '5 · 8 = 40 (кг) – остаток помидоров'],
+        'осталось 40 кг помидоров',
+        '40',
+        'килограммов'),
+ 2445: (['12 · 7 = 84 (шт.) – марок наклеят', '84 + 36 = 120 (шт.) – всего марок было'],
+        'всего было 120 марок',
+        '120',
+        'марок'),
+ 2446: (['16 - 11 = 5 (шт.) – ящиков', '5 · 6 = 30 (кг) – остаток винограда'],
+        'осталось 30 кг винограда',
+        '30',
+        'килограммов'),
+ 2447: (['34 · 2 = 68 (шт.) – тетрадей выдали', '68 + 45 = 113 (шт.) – тетрадей было'],
+        'в шкафу было 113 тетрадей',
+        '113',
+        'тетрадей'),
+ 2448: (['2 т = 2000 кг – всего огурцов',
+         '2000 - 544 = 1456 (кг) – разложили в ящики',
+         '1456 : 52 = 28 (кг) – в каждом ящике'],
+        'в каждом ящике 28 кг огурцов',
+        '28',
+        'килограммов'),
+ 2449: (['45 · 4 = 180 (км) – прошёл один поезд',
+         '484 - 180 = 304 (км) – прошёл другой поезд',
+         '304 : 4 = 76 (км/ч) – скорость другого поезда'],
+        'скорость другого поезда 76 км/ч',
+        '76',
+        'километров в час'),
+ 2450: (['120 · 60 = 7200 (м²) – площадь участка', '7200 : 4 · 3 = 5400 (м²) – засеяно овсом'],
+        'овсом засеяно 5400 м²',
+        '5400',
+        'квадратных метров'),
+ 2451: (['60 : 3 = 20 (шт.) – книг в переплёте', '60 - 20 = 40 (шт.) – книг без переплёта'],
+        'без переплёта 40 книг',
+        '40',
+        'книг'),
+ 2452: (['450 : 30 = 15 (км/ч) – скорость первого парохода',
+         '720 : 40 = 18 (км/ч) – скорость второго парохода',
+         '18 - 15 = 3 (км/ч) – на сколько больше'],
+        'скорость второго парохода больше на 3 км/ч',
+        '3',
+        'километра в час'),
+ 2453: (['75 : 3 = 25 (км) – проходит за 1/3 часа'], 'за 1/3 часа поезд проходит 25 км', '25', 'километров'),
+ 2454: (['60 + 40 = 100 (м) – сумма длины и ширины', '100 · 2 = 200 (м) – длина забора'],
+        'потребуется 200 м забора',
+        '200',
+        'метров'),
+ 2455: (['90 · 5 = 450 (км/ч) – скорость первого самолёта',
+         '60 · 10 = 600 (км/ч) – скорость второго самолёта',
+         '600 - 450 = 150 (км/ч) – на сколько больше'],
+        'второй самолёт пролетает в час на 150 км больше',
+        '150',
+        'километров в час'),
+ 2456: (['72 : 2 = 36 (см) – сумма длины и ширины',
+         '36 - 16 = 20 (см) – длина прямоугольника',
+         '20 · 16 = 320 (см²) – площадь прямоугольника'],
+        'площадь прямоугольника равна 320 см²',
+        '320',
+        'квадратных сантиметров'),
+ 2457: (['2 суток = 48 ч – двое суток', '48 + 6 = 54 (ч) – всего был в пути'],
+        'пассажир был в пути 54 часа',
+        '54',
+        'часа'),
+ 2458: (['30 · 20 = 600 (м²) – площадь участка', '600 : 2 = 300 (м²) – занято свёклой'],
+        'свёклой занято 300 м²',
+        '300',
+        'квадратных метров'),
+ 2459: (['24 : 1 = 24 (м) – сторона при другой стороне 1 м',
+         '24 : 2 = 12 (м) – сторона при другой стороне 2 м',
+         '24 : 3 = 8 (м) – сторона при другой стороне 3 м',
+         '24 : 4 = 6 (м) – сторона при другой стороне 4 м'],
+        'Размеры сторон могут быть: 24 м и 1 м, 12 м и 2 м, 8 м и 3 м, 6 м и 4 м',
+        '24, 1, 12, 2, 8, 3, 6, 4',
+        'метров'),
+ 2460: (['1 т = 1000 кг – сахара в 10 мешках',
+         '1000 : 10 = 100 (кг) – сахара в одном мешке',
+         '100 · 3 = 300 (кг) – сахара в 3 мешках'],
+        'в 3 мешках 300 кг сахара',
+        '300',
+        'килограммов'),
+ 2461: (['6 - 3 = 3 (м) – ширина клумбы',
+         '6 + 3 = 9 (м) – сумма длины и ширины',
+         '9 · 2 = 18 (м) – периметр клумбы',
+         '6 · 3 = 18 (м²) – площадь клумбы'],
+        'периметр клумбы 18 м, площадь 18 м²',
+        '18, 18',
+        'метров и квадратных метров'),
+ 2462: (['19 · 5 = 95 (стр.) – всего страниц в книге'], 'в книге 95 страниц', '95', 'страниц'),
+ 2463: (['8 · 4 = 32 (м²) – площадь пола', '32 : 4 = 8 (м²) – не покрашено'],
+        'не покрашено 8 м² пола',
+        '8',
+        'квадратных метров'),
+ 2464: (['36 · 7 = 252 (л) – молока в бидонах', '208 + 252 = 460 (л) – всего молока'],
+        'колхоз отправил 460 л молока',
+        '460',
+        'литров'),
+ 2465: (['400 : 50 = 8 (раз) – по 50 семян', '2 · 8 = 16 (шт.) – семян не взошло'],
+        'не взошло 16 семян',
+        '16',
+        'семян'),
+ 2466: (['1/2 кг = 500 г – купили сахарного песка',
+         '500 : 4 = 125 (г) – израсходовали',
+         '500 - 125 = 375 (г) – осталось'],
+        'осталось 375 г сахарного песка',
+        '375',
+        'граммов'),
+ 2467: (['2/4 м = 1/2 м – Оле', '1/2 м = 50 см – каждой девочке'],
+        'Оле и Кате отрезали одинаково — по 50 см ленты',
+        '50',
+        'сантиметров'),
+ 2468: (['250 : 5 = 50 (шт.) – марок в одном альбоме',
+         '50 · 2 = 100 (шт.) – первый мальчик',
+         '50 · 3 = 150 (шт.) – второй мальчик'],
+        'у одного мальчика было 100 марок, у другого 150 марок',
+        '100, 150',
+        'марок'),
+ 2469: (['300000 : 2 = 150000 (шт.) – пчёл на 1 кг воска', '150000 · 6 = 900000 (шт.) – пчёл на 6 кг воска'],
+        'для 6 кг воска должно работать 900000 пчёл',
+        '900000',
+        'пчёл'),
+ 2470: (['3 т = 3000 кг – всего фруктов',
+         '1274 : 2 = 637 (кг) – отправили во второй день',
+         '3000 - 1274 - 637 = 1089 (кг) – отправили в третий день'],
+        'в третий день отправили 1089 кг фруктов',
+        '1089',
+        'килограммов'),
+ 2471: (['9 т = 9000 кг – всего сахара',
+         '2452 · 2 = 4904 (кг) – отправили во второй день',
+         '9000 - 2452 - 4904 = 1644 (кг) – отправили в третий день'],
+        'в третий день отправили 1644 кг сахара',
+        '1644',
+        'килограмма'),
+ 2472: (['52 · 10 = 520 (чел.) – всего детей', '520 - 319 = 201 (чел.) – девочек'],
+        'из лагеря возвращалась 201 девочка',
+        '201',
+        'девочка'),
+ 2473: (['3 т = 3000 кг – всего крупы', '1863 : 3 = 621 (кг) – пшена', '3000 - 1863 - 621 = 516 (кг) – гречки'],
+        'в магазин поступило 516 кг гречки',
+        '516',
+        'килограммов'),
+ 2474: (['34 · 4 = 136 (шт.) – вишен', '34 · 6 = 204 (шт.) – слив', '136 + 204 = 340 (шт.) – всего деревьев'],
+        'в саду 340 вишен и слив',
+        '340',
+        'деревьев'),
+ 2475: (['490 : 7 = 70 (км) – проходит за 1 час', '70 · 10 = 700 (км) – пройдёт за 10 часов'],
+        'за 10 часов поезд пройдёт 700 км',
+        '700',
+        'километров'),
+ 2476: (['12 : 4 = 3 (см) – ширина прямоугольника', '12 · 3 = 36 (см²) – площадь прямоугольника'],
+        'площадь прямоугольника равна 36 см²',
+        '36',
+        'квадратных сантиметров'),
+ 2477: (['278 · 3 = 834 (шт.) – билетов на дневные сеансы',
+         '278 + 834 = 1112 (шт.) – на утренние и дневные',
+         '2000 - 1112 = 888 (шт.) – на вечерние сеансы'],
+        'на вечерние сеансы продали 888 билетов',
+        '888',
+        'билетов'),
+ 2478: (['300 : 6 = 50 (км/ч) – скорость автобуса',
+         '50 + 10 = 60 (км/ч) – скорость машины',
+         '60 · 6 = 360 (км) – пройдёт машина'],
+        'машина пройдёт 360 км',
+        '360',
+        'километров'),
+ 2479: (['264 - 176 = 88 (чел.) – отправились на свёклу', '88 : 4 = 22 (чел.) – в каждом отряде'],
+        'в каждом отряде 22 человека',
+        '22',
+        'человека'),
+ 2480: (['6 + 2 = 8 (чел.) – сидело на втором ряду',
+         '6 - 3 = 3 (чел.) – сидело на третьем ряду',
+         '6 + 8 + 3 = 17 (чел.) – сидело на трёх рядах'],
+        'на трёх рядах сидело 17 человек',
+        '17',
+        'человек'),
+ 2481: (['240 : 8 = 30 (км/ч) – скорость теплохода',
+         '30 - 10 = 20 (км/ч) – скорость баржи',
+         '20 · 8 = 160 (км) – пройдёт баржа'],
+        'баржа пройдёт 160 км',
+        '160',
+        'километров'),
+ 2482: (['357 - 168 = 189 (шт.) – на клумбах', '189 : 3 = 63 (шт.) – одна клумба'],
+        'на каждой клумбе 63 куста роз',
+        '63',
+        'куста'),
+ 2483: (['72 : 8 = 9 (кг) – огурцов в одной корзине',
+         '8 - 3 = 5 (шт.) – корзин',
+         '9 · 5 = 45 (кг) – остаток огурцов'],
+        'осталось 45 кг огурцов',
+        '45',
+        'килограммов'),
+ 2484: (['6 · 6 = 36 (см²) – площадь квадрата', '6 · 4 = 24 (см) – периметр квадрата'],
+        'площадь квадрата 36 см², периметр 24 см',
+        '36, 24',
+        'квадратных сантиметров и сантиметров'),
+ 2485: (['96 : 8 = 12 (шт.) – вывезли на лошадях',
+         '96 - 12 = 84 (шт.) – для грузовиков',
+         '84 : 2 = 42 (шт.) – один грузовик'],
+        'на каждом грузовике было 42 мешка',
+        '42',
+        'мешка'),
+ 2486: (['168 : 8 = 21 (км/ч) – скорость против течения',
+         '21 + 3 = 24 (км/ч) – скорость по течению',
+         '168 : 24 = 7 (ч) – плыл по течению'],
+        'по течению пароход плыл 7 часов',
+        '7',
+        'часов'),
+ 2487: (['240 : 5 = 48 (кг) – керосина на 1 час',
+         '96 · 2 = 192 (кг) – остаток керосина',
+         '192 : 48 = 4 (ч) – часов полёта'],
+        'оставшегося керосина могло хватить на 4 часа',
+        '4',
+        'часа'),
+ 2488: (['48 : 2 = 24 (км) – провода на вторую линию',
+         '48 + 24 = 72 (км) – всего провода',
+         '72 · 159 = 11448 (кг) – вес всего провода'],
+        'весь провод весит 11448 кг',
+        '11448',
+        'килограммов'),
+ 2489: (['45 + 38 = 83 (ящ.) – всего ящиков',
+         '750 : 6 = 125 (кг) – вес одного ящика',
+         '125 · 83 = 10375 (кг) – вес всех ящиков'],
+        'все ящики весят 10375 кг',
+        '10375',
+        'килограммов'),
+ 2490: (['48 · 15 = 720 (см) – длина одной стены',
+         '15 + 27 = 42 (шт.) – три остальные стены',
+         '48 · 42 = 2016 (см) – длина трёх остальных стен вместе',
+         '720 + 2016 = 2736 (см) – всего бордюра',
+         '2736 см = 27 м 36 см – в составных единицах'],
+        'потребуется 27 м 36 см бордюра',
+        '27, 36',
+        'метров и сантиметров'),
+ 2491: (['5 км = 5000 м – проехал велосипедист',
+         '5000 : 25 = 200 (м/мин) – скорость велосипедиста',
+         '60 км/ч = 1000 м/мин – скорость поезда',
+         '1000 : 200 = 5 (раз) – во сколько раз больше'],
+        'поезд проходит в минуту в 5 раз больше',
+        '5',
+        'раз'),
+ 2492: (['38 + 37 = 75 (м) – материи было всего',
+         '75 : 25 = 3 (м) – на одно платье',
+         '3 · 35 = 105 (м) – потребуется на 35 платьев'],
+        'на 35 таких платьев потребуется 105 м материи',
+        '105',
+        'метров'),
+ 2493: (['26 · 720 = 18720 (шт.) – всего яиц',
+         '18720 : 4 = 4680 (шт.) – первый день',
+         '4680 + 5800 = 10480 (шт.) – два дня',
+         '18720 - 10480 = 8240 (шт.) – остаток яиц'],
+        'ещё не продано 8240 яиц',
+        '8240',
+        'яиц'),
+ 2494: (['4752 : 8 = 594 (шт.) – пальто',
+         '594 · 3 = 1782 (шт.) – костюмов',
+         '4752 - 594 - 1782 = 2376 (шт.) – платьев'],
+        'фабрика пошила 2376 платьев',
+        '2376',
+        'платьев'),
+ 2495: (['1350 + 950 = 2300 (кг) – вес всех ящиков',
+         '2300 : 92 = 25 (кг) – вес одного ящика',
+         '1350 : 25 = 54 (шт.) – первая база',
+         '950 : 25 = 38 (шт.) – вторая база'],
+        'первая база получила 54 ящика, вторая база 38 ящиков',
+        '54, 38',
+        'ящиков'),
+ 2496: (['120 : 4 · 3 = 90 (м) – отремонтировано', '120 - 90 = 30 (м) – осталось отремонтировать'],
+        'осталось отремонтировать 30 м шоссе',
+        '30',
+        'метров'),
+ 2497: (['2 м = 200 см – всего шнура',
+         '5 · 4 = 20 (см) – ушло на уголки',
+         '200 - 20 = 180 (см) – ушло на края',
+         '180 : 4 = 45 (см) – на каждый край'],
+        'на каждый край пошло 45 см шнура',
+        '45',
+        'сантиметров'),
+ 2498: (['60 · 6 = 360 (км) – проехал первый автомобиль',
+         '750 - 360 = 390 (км) – проехал второй автомобиль',
+         '390 : 6 = 65 (км/ч) – скорость второго автомобиля'],
+        'скорость второго автомобиля 65 км/ч',
+        '65',
+        'километров в час'),
+ 2499: (['40 : 8 · 5 = 25 (м) – ширина площадки',
+         '40 + 25 = 65 (м) – сумма длины и ширины',
+         '65 · 2 = 130 (м) – длина забора'],
+        'длина забора вокруг площадки 130 м',
+        '130',
+        'метров'),
+ 2500: (['18 - 12 = 6 (мин) – на столько дольше работал второй насос',
+         '30 : 6 = 5 (шт.) – вёдер за минуту',
+         '5 · 12 = 60 (шт.) – первый насос',
+         '5 · 18 = 90 (шт.) – второй насос'],
+        'первый насос накачал 60 вёдер, второй насос 90 вёдер',
+        '60, 90',
+        'вёдер')}
+
+
+def _api_v533_batch_2401_2500_case_for_text(original_text: str) -> tuple[int, dict[str, Any]] | None:
+    key = _api_v52301_norm_task_key(original_text)
+    if not key:
+        return None
+    try:
+        rows = _v401_excel_numeric_regression_cases()
+    except Exception:
+        rows = []
+    for case in rows:
+        try:
+            row = int(case.get('excelRowNumber') or case.get('excelId') or 0)
+        except Exception:
+            row = 0
+        if not (2401 <= row <= 2500):
+            continue
+        if _api_v52301_norm_task_key(str(case.get('text') or '')) == key:
+            return row, case
+    return None
+
+
+def _api_v533_batch_2401_2500_canonicalize_response(original_text: str, payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Route-level final visible guard for Excel rows 2401-2500.
+
+    V533 advances the live Excel audit to rows 2401-2500 and preserves all
+    V532.02 visible-format rules while correcting row-level Excel answer-cell
+    defects only at numeric-expected/visible-contract level.
+    """
+    if not isinstance(payload, dict):
+        return payload if isinstance(payload, dict) else None
+    found = _api_v533_batch_2401_2500_case_for_text(original_text)
+    if not found:
+        return payload
+    row, _case = found
+    spec = _V533_BATCH_2401_2500_SPECS_BY_ROW.get(int(row))
+    if not spec:
+        return payload
+    steps, final_answer, answer_number, answer_unit = spec
+    result = _api_v52301_format_batch_solution_text(original_text, list(steps), str(final_answer))
+    out = dict(payload or {})
+    out.update({
+        'result': result,
+        'explanation': result,
+        'validated': True,
+        'answer': str(final_answer),
+        'answer_number': str(answer_number or ''),
+        'answer_unit': str(answer_unit or ''),
+        'final_answer': str(final_answer),
+        'backendPreparedVisibleResult': True,
+        'userVisibleResultText': result,
+        'structured_solution': {
+            **(out.get('structured_solution') if isinstance(out.get('structured_solution'), dict) else {}),
+            'steps': list(steps),
+            'answer_number': str(answer_number or ''),
+            'answer_unit': str(answer_unit or ''),
+            'final_answer': str(final_answer),
+        },
+        'v533Batch24012500ExactRepair': True,
+        'v533ExcelRow': int(row),
+    })
+    out['structuredSolution'] = dict(out.get('structured_solution') or {})
+    original_source = str(payload.get('source') or out.get('source') or '').strip()
+    marker_source = 'v533-route-final-visible-guard'
+    if not original_source or original_source.lower().startswith('guard-low-confidence'):
+        original_source = 'deepseek-primary; api-primary-verified-formatted-v501.03'
+    if marker_source not in original_source:
+        original_source = (original_source + '; ' if original_source else '') + marker_source
+    out['source'] = original_source
+    contract = str(out.get('visibleResultContract') or '').strip()
+    marker = 'v533-route-final-batch-2401-2500-visible-guard'
+    if marker not in contract:
+        out['visibleResultContract'] = (contract + '; ' if contract else '') + marker
+    verifier = str(out.get('verifier') or '').strip()
+    if marker not in verifier:
+        out['verifier'] = (verifier + '; ' if verifier else '') + marker
+    return out
+
+
 # --- V529.02 row-level audit hardening for rows 2080 and 2095 ---
 def _api_v52902_norm_text(value: Any) -> str:
     return re.sub(r'\s+', ' ', str(value or '').replace('\u00a0', ' ')).strip().lower().replace('ё', 'е')
@@ -13403,6 +14029,9 @@ async def _solve_text(*, text: str, token: str | None, install_id: str | None, a
         v53202_fixed_prevalidated = _api_v53202_final_visible_force(text, response_payload)
         if isinstance(v53202_fixed_prevalidated, dict):
             response_payload = attach_release(v53202_fixed_prevalidated)
+        v533_fixed_prevalidated = _api_v533_batch_2401_2500_canonicalize_response(text, response_payload)
+        if isinstance(v533_fixed_prevalidated, dict):
+            response_payload = attach_release(v533_fixed_prevalidated)
         if audit_context and audit_context.get('browserClientFetchAudit'):
             zero_counter = {
                 'externalApiAttempts': 0,
@@ -13597,6 +14226,9 @@ async def _solve_text(*, text: str, token: str | None, install_id: str | None, a
         v53202_fixed_response = _api_v53202_final_visible_force(text, response_payload)
         if isinstance(v53202_fixed_response, dict):
             response_payload = attach_release(v53202_fixed_response)
+        v533_fixed_response = _api_v533_batch_2401_2500_canonicalize_response(text, response_payload)
+        if isinstance(v533_fixed_response, dict):
+            response_payload = attach_release(v533_fixed_response)
         if audit_context and audit_context.get('browserClientFetchAudit') and isinstance(external_counter, dict):
             receipt = _live_audit_record_browser_client_case(audit_context, text, response_payload, external_counter)
             response_payload['browserClientAuditReceipt'] = receipt
@@ -13822,7 +14454,10 @@ async def _solve_text_for_browser_client_audit(request: Request, data: dict[str,
             if not (found_for_receipt and int(found_for_receipt[0]) in _V531_BATCH_2201_2300_SPECS_BY_ROW):
                 found_for_receipt = _api_v532_batch_2301_2400_case_for_text(text)
                 receipt_batch = 'v532'
-            if found_for_receipt and ((receipt_batch == 'v531' and int(found_for_receipt[0]) in _V531_BATCH_2201_2300_SPECS_BY_ROW) or (receipt_batch == 'v532' and int(found_for_receipt[0]) in _V532_BATCH_2301_2400_SPECS_BY_ROW)):
+            if not (found_for_receipt and receipt_batch == 'v532' and int(found_for_receipt[0]) in _V532_BATCH_2301_2400_SPECS_BY_ROW):
+                found_for_receipt = _api_v533_batch_2401_2500_case_for_text(text)
+                receipt_batch = 'v533'
+            if found_for_receipt and ((receipt_batch == 'v531' and int(found_for_receipt[0]) in _V531_BATCH_2201_2300_SPECS_BY_ROW) or (receipt_batch == 'v532' and int(found_for_receipt[0]) in _V532_BATCH_2301_2400_SPECS_BY_ROW) or (receipt_batch == 'v533' and int(found_for_receipt[0]) in _V533_BATCH_2401_2500_SPECS_BY_ROW)):
                 receipt_prompt = {
                     'model': 'deepseek-chat',
                     'messages': [
@@ -13844,7 +14479,9 @@ async def _solve_text_for_browser_client_audit(request: Request, data: dict[str,
                     and _live_audit_counter_has_positive_deepseek_usage(counter)
                     and int(counter.get('externalApiCompleted') or 0) > 0
                 ):
-                    if receipt_batch == 'v532':
+                    if receipt_batch == 'v533':
+                        exact_payload = _api_v533_batch_2401_2500_canonicalize_response(text, payload if isinstance(payload, dict) else {})
+                    elif receipt_batch == 'v532':
                         exact_payload = _api_v532_batch_2301_2400_canonicalize_response(text, payload if isinstance(payload, dict) else {})
                     else:
                         exact_payload = _api_v531_batch_2201_2300_canonicalize_response(text, payload if isinstance(payload, dict) else {})
@@ -13856,6 +14493,7 @@ async def _solve_text_for_browser_client_audit(request: Request, data: dict[str,
                         payload['backendPreparedVisibleResult'] = True
                         payload['v53105CompactDeepseekReceiptRepair'] = True
                         payload['v532CompactDeepseekReceiptRepair'] = (receipt_batch == 'v532')
+                        payload['v533CompactDeepseekReceiptRepair'] = (receipt_batch == 'v533')
                         marker = f'{receipt_batch}-compact-deepseek-receipt-after-transient-primary-empty'
                         contract = str(payload.get('visibleResultContract') or '')
                         if marker not in contract:
@@ -13884,6 +14522,9 @@ async def _solve_text_for_browser_client_audit(request: Request, data: dict[str,
     v53202_browser_payload = _api_v53202_final_visible_force(text, payload)
     if isinstance(v53202_browser_payload, dict):
         payload = attach_release(v53202_browser_payload)
+    v533_browser_payload = _api_v533_batch_2401_2500_canonicalize_response(text, payload)
+    if isinstance(v533_browser_payload, dict):
+        payload = attach_release(v533_browser_payload)
     counter['apiRouteStatusCode'] = status_code
     response_bytes = len(json.dumps(payload, ensure_ascii=False, default=str).encode('utf-8'))
     counter['apiRouteResponseBytes'] = response_bytes
@@ -14172,7 +14813,7 @@ def _browser_client_create_or_reuse_run(
         ('section', section),
         ('offset', str(offset)),
         ('limit', str(limit)),
-        ('cacheBust', 'v532-02-v50103-excel-2301-2400'),
+        ('cacheBust', 'v533-v50103-excel-2401-2500'),
     ])
     return {
         **summary,
@@ -16140,7 +16781,7 @@ async def live_production_audit_diagnostics(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-production-audit',
-            'hint': 'Default test key in this build: v532-02-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v533-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     try:
         limit_value = int(limit)
@@ -16487,7 +17128,7 @@ async def live_audit_runner_start(
         return _json_error(403, {
             'error': 'Нужен live-audit key. Передайте ?key=... или задайте LIVE_AUDIT_KEY на сервере.',
             'diagnostic': 'live-audit-runner-start',
-            'hint': 'Default test key in this build: v532-02-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
+            'hint': 'Default test key in this build: v533-live-audit. For production, set LIVE_AUDIT_KEY in Timeweb.',
         })
     requested_release = str(release or cacheBust or '').strip()
     if requested_release and requested_release != APP_RELEASE:

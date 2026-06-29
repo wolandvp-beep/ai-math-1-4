@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v532_02_v50103_excel_2301_2400'
-SOLVER_VERSION = 'v532-02-v50103-excel-2301-2400'
+APP_RELEASE = 'v533_v50103_excel_2401_2500'
+SOLVER_VERSION = 'v533-v50103-excel-2401-2500'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -2186,6 +2186,9 @@ def _v52904_speed_division_semantic_issues(task_text: str, result_text: str) -> 
     or equality with the final speed answer), never by an Excel row or wording.
     """
     if not _v52904_is_speed_question(task_text):
+        return []
+    task_norm_v533 = str(task_text or '').lower().replace('ё', 'е')
+    if re.search(r'во\s+сколько\s+раз[^?!.]*скорост', task_norm_v533):
         return []
     lines = [line.strip() for line in str(result_text or '').replace('\r', '\n').split('\n') if line.strip()]
     answer_line = next((line for line in lines if re.match(r'^ответ\s*:', line, flags=re.IGNORECASE)), '')

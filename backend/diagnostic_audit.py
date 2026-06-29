@@ -143,7 +143,7 @@ def _excel_visible_step_unit_explanation_issues(case: dict[str, Any], result: st
         # V522.02: Excel may contain a wrong raw noun (e.g. row 1332 says
         # "25 детей" while the task asks for деталей). Prefer the question
         # target before falling back to the noisy Excel answer noun.
-        if re.search(r'скольк(?:о|их|ими)?\s+(?:всего\s+)?(?:детал(?:ей|и|ь|я)?|кубик(?:ов|а)?|лист(?:ов|а)?|квартир(?:а|ы)?|билет(?:ов|а)?|перчат(?:ок|ки)?|пар(?:ы)?|команд(?:ы)?|вед(?:ер|ра|ро)|вёд(?:ер|ра|ро)|носк(?:ов|а)?)\b', _q_v40502):
+        if re.search(r'скольк(?:о|их|ими)?\s+(?:всего\s+)?(?:детал(?:ей|и|ь|я)?|кубик(?:ов|а)?|лист(?:ов|а)?|квартир(?:а|ы)?|билет(?:ов|а)?|перчат(?:ок|ки)?|пар(?:ы)?|команд(?:ы)?|вед(?:ер|ра|ро)|вёд(?:ер|ра|ро)|носк(?:ов|а)?|учебник(?:ов|а|и)?)\b', _q_v40502):
             return 'piece'
         m = re.search(r'(?<!\d)-?\d+(?:[,.]\d+)?\s+([а-яёa-z.]+)', raw_answer, flags=re.IGNORECASE)
         if not m:
