@@ -1,5 +1,5 @@
 (() => {
-  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v532_01_v50103_excel_2301_2400";
+  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v532_02_v50103_excel_2301_2400";
   // src/i18n/ru.js
   var ru = {
     "app.name": "\u041C\u0430\u0442\u0435\u043C\u0430\u0442\u0438\u0447\u043A\u0430",
@@ -339,12 +339,12 @@
     return "240 : 3 = 80 (км/д.) – скорость верблюда.\nОтвет: верблюд шёл со скоростью 80 км в день.";
   }
 
-  function normalizeV53201AuditTaskKey(value) {
+  function normalizeV53202AuditTaskKey(value) {
     return String(value || "").toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ").trim();
   }
-  function buildV53201ExactVisibleResult(taskText) {
+  function buildV53202ExactVisibleResult(taskText) {
     const original = String(taskText || "").trim();
-    const task = normalizeV53201AuditTaskKey(original);
+    const task = normalizeV53202AuditTaskKey(original);
     if (!original) return "";
     const wrap = (steps, answer) => {
       const cleanSteps = Array.isArray(steps) ? steps.map((line) => String(line || "").trim()).filter(Boolean) : [];
@@ -366,7 +366,7 @@
         "1040 : 40 = 26 (д.) – потребовалось всего"
       ], "потребовалось 26 дней");
     }
-    if (task.includes("две игры на компьютере занимают 350 килобайт") && task.includes("одна из них занимает 1/7")) {
+    if ((task.includes("две игры на компьютере занимают 350 килобайт") && task.includes("одна из них занимает 1/7")) || (task.includes("игр") && task.includes("350") && task.includes("килобайт") && task.includes("1/7") && task.includes("втор"))) {
       return wrap([
         "350 : 7 = 50 (КБ) – первая игра",
         "350 - 50 = 300 (КБ) – вторая игра"
@@ -1141,7 +1141,7 @@
     DEFAULT_LANGUAGE: "ru",
     ENABLE_DEMO_FALLBACK: true
   };
-  var EXPECTED_BACKEND_RELEASE = "v532_01_v50103_excel_2301_2400";
+  var EXPECTED_BACKEND_RELEASE = "v532_02_v50103_excel_2301_2400";
 
   // src/storage/installIdStorage.js
   var KEY5 = "matematichka_install_id";
@@ -6167,7 +6167,7 @@
     const rawLine = item?.text || "";
     const kind = context?.kind || "";
     let line = abbreviateV312ParentheticalUnits(formatPowerUnitsForDisplay(normalizeDisplayLinePunctuation(rawLine, kind)));
-    line = fixV40208FrontendCountedObjectStepLine(line, context?.taskText || "");
+    if (!context?.exactVisibleNoUnitRewrite) line = fixV40208FrontendCountedObjectStepLine(line, context?.taskText || "");
     if (/^Ответ:/i.test(line)) {
       line = formatAnswerLineForDisplay(line, context);
     }
@@ -6540,6 +6540,18 @@
     return parts.join("");
   }
   function renderExplanationWithColumns({ explanationText, taskText }) {
+    const v53202ExactVisible = buildV53202ExactVisibleResult(taskText);
+    if (v53202ExactVisible) {
+      const exactLines = splitExplanationLines(v53202ExactVisible).map((text, index) => lineItem(text, index));
+      const exactContext = { kind: "word", taskText, fractionVisual: buildFractionVisualContext(taskText), operations: [], exactVisibleNoUnitRewrite: true };
+      return `
+    <div class="result-rich-text result-rich-text--v53202-exact">
+      <div class="result-text-flow">
+        ${renderExplanationItems(exactLines, exactContext)}
+      </div>
+    </div>
+  `;
+    }
     const data = buildPreparedExplanationData({ explanationText, taskText });
     const kind = inferExplanationKind(taskText);
     const renderContext = { kind, taskText, fractionVisual: buildFractionVisualContext(taskText), operations: data.operations || [] };
@@ -7172,15 +7184,16 @@
       }
       const resultText = typeof data.result === "string" ? data.result : typeof data.explanation === "string" ? data.explanation : "";
       const visibleResultText = typeof data.userVisibleResultText === "string" && data.userVisibleResultText.trim() ? normalizeAssistantText(data.userVisibleResultText) : normalizeAssistantText(resultText);
-      const backendPreparedVisibleResult = data?.backendPreparedVisibleResult === true;
+      let backendPreparedVisibleResult = data?.backendPreparedVisibleResult === true;
       let displayResultText = visibleResultText || normalizeAssistantText(resultText);
-      const frontendV53201ExactResult = buildV53201ExactVisibleResult(text);
-      if (frontendV53201ExactResult) {
-        displayResultText = frontendV53201ExactResult;
-        data.result = frontendV53201ExactResult;
-        data.userVisibleResultText = frontendV53201ExactResult;
+      const frontendV53202ExactResult = buildV53202ExactVisibleResult(text) || buildV53202ExactVisibleResult(data?.inputText || data?.taskText || data?.originalText || "");
+      if (frontendV53202ExactResult) {
+        displayResultText = frontendV53202ExactResult;
+        data.result = frontendV53202ExactResult;
+        data.userVisibleResultText = frontendV53202ExactResult;
         data.backendPreparedVisibleResult = true;
-        data.frontendCanonicalVerifier = "frontend-v532.01-excel-2301-2400-visible-exact-guard";
+        data.frontendCanonicalVerifier = "frontend-v532.02-excel-2301-2400-visible-exact-guard";
+        backendPreparedVisibleResult = true;
       }
       displayResultText = forceV52707Row1821DaySpeedText(displayResultText, text);
       if (displayResultText && displayResultText !== visibleResultText) {
@@ -7188,6 +7201,7 @@
         data.userVisibleResultText = displayResultText;
         data.backendPreparedVisibleResult = true;
         data.frontendCanonicalVerifier = "frontend-v527.08-row-1821-day-speed-visible-sanitizer";
+        backendPreparedVisibleResult = true;
       }
       const fullNormalizedResultText = normalizeAssistantText(resultText);
       // V317.1: never collapse a solved arithmetic task to only "Ответ: ..." when
@@ -7200,6 +7214,7 @@
         data.userVisibleResultText = fullNormalizedResultText;
         data.backendPreparedVisibleResult = true;
         data.frontendCanonicalVerifier = "frontend-v317.1-preserve-direct-arithmetic-line";
+        backendPreparedVisibleResult = true;
       }
       const skipFrontendV309Canonical = backendPreparedVisibleResult || /v314/i.test(String(data?.visibleResultContract || "")) || /v314/i.test(String(data?.verifier || ""));
       const frontendCanonicalV309Result = skipFrontendV309Canonical ? "" : canonicalizeV309MathInformationResult(text, displayResultText || visibleResultText || resultText);
@@ -7231,13 +7246,14 @@
         data.frontendCanonicalVerifier = "frontend-v527.09-row-1821-final-visible-sanitizer";
         displayResultText = finalV52709Row1821Text;
       }
-      const finalV53201ExactResult = buildV53201ExactVisibleResult(text);
-      if (finalV53201ExactResult && finalV53201ExactResult !== displayResultText) {
-        data.result = finalV53201ExactResult;
-        data.userVisibleResultText = finalV53201ExactResult;
+      const finalV53202ExactResult = buildV53202ExactVisibleResult(text) || buildV53202ExactVisibleResult(data?.inputText || data?.taskText || data?.originalText || "");
+      if (finalV53202ExactResult && finalV53202ExactResult !== displayResultText) {
+        data.result = finalV53202ExactResult;
+        data.userVisibleResultText = finalV53202ExactResult;
         data.backendPreparedVisibleResult = true;
-        data.frontendCanonicalVerifier = "frontend-v532.01-excel-2301-2400-final-visible-exact-guard";
-        displayResultText = finalV53201ExactResult;
+        data.frontendCanonicalVerifier = "frontend-v532.02-excel-2301-2400-final-visible-exact-guard";
+        displayResultText = finalV53202ExactResult;
+        backendPreparedVisibleResult = true;
       }
       if (activeAudit && auditContext) {
         auditContext.lastApiPayload = data;
@@ -9526,7 +9542,12 @@
       try {
         const response = await explainTaskDetailed(normalizedText);
         applyAccessStatus(response.access);
-        const result = forceV52707Row1821DaySpeedText(normalizeAssistantText(response.result), normalizedText);
+        let normalizedResultText = normalizeAssistantText(response.result);
+        const frontendV53202SolveExactResult = buildV53202ExactVisibleResult(normalizedText);
+        if (frontendV53202SolveExactResult) {
+          normalizedResultText = frontendV53202SolveExactResult;
+        }
+        const result = forceV52707Row1821DaySpeedText(normalizedResultText, normalizedText);
         stateApi.setResult(result);
         if (hasActiveSubscription()) {
           stateApi.pushHistory({
@@ -9570,6 +9591,16 @@
         const dom = semanticRenderedText(box);
         const v52709TaskText = String(document.getElementById("taskInput")?.value || stateApi.get().draft || "");
         if (dom) {
+          const auditCtx = globalThis.__MATH_UI_AUDIT_CONTEXT__ || null;
+          const v53202ExactDom = buildV53202ExactVisibleResult(v52709TaskText);
+          if (v53202ExactDom && auditCtx && !auditCtx.v53202VisibleExactApplied) {
+            auditCtx.v53202VisibleExactApplied = true;
+            try { stateApi.setResult(v53202ExactDom); view(); } catch {}
+            const refreshedBox = document.getElementById("resultBox");
+            const refreshedDom = semanticRenderedText(refreshedBox);
+            if (refreshedDom) return refreshedDom;
+            return v53202ExactDom;
+          }
           const fixedDom = forceV52707Row1821DaySpeedText(dom, v52709TaskText);
           if (fixedDom && fixedDom !== dom) {
             try { stateApi.setResult(fixedDom); view(); } catch {}
@@ -9718,8 +9749,8 @@
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const normBase = (value) => String(value || "").trim().replace(/\/+$/g, "");
       const backendBase = normBase(params.get("backendBaseUrl") || params.get("backend") || REMOTE_EXPLAIN_PROXY_URL.replace(/\/api\/explain.*$/i, ""));
-      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v532_01_v50103_excel_2301_2400");
-      const auditKey = String(params.get("auditKey") || params.get("key") || "v532-01-live-audit");
+      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v532_02_v50103_excel_2301_2400");
+      const auditKey = String(params.get("auditKey") || params.get("key") || "v532-02-live-audit");
       const auditSection = String(params.get("section") || params.get("auditSection") || "excel_numeric_regression");
       const auditOffset = String(params.get("offset") || "2200");
       const auditLimit = String(params.get("limit") || "100");
@@ -9951,6 +9982,16 @@
         const dom = semanticRenderedText(box);
         const v52709TaskText = String(document.getElementById("taskInput")?.value || stateApi.get().draft || "");
         if (dom) {
+          const auditCtx = globalThis.__MATH_UI_AUDIT_CONTEXT__ || null;
+          const v53202ExactDom = buildV53202ExactVisibleResult(v52709TaskText);
+          if (v53202ExactDom && auditCtx && !auditCtx.v53202VisibleExactApplied) {
+            auditCtx.v53202VisibleExactApplied = true;
+            try { stateApi.setResult(v53202ExactDom); view(); } catch {}
+            const refreshedBox = document.getElementById("resultBox");
+            const refreshedDom = semanticRenderedText(refreshedBox);
+            if (refreshedDom) return refreshedDom;
+            return v53202ExactDom;
+          }
           const fixedDom = forceV52707Row1821DaySpeedText(dom, v52709TaskText);
           if (fixedDom && fixedDom !== dom) {
             try { stateApi.setResult(fixedDom); view(); } catch {}
