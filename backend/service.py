@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v533_01_v50103_excel_2401_2500'
-SOLVER_VERSION = 'v533-01-v50103-excel-2401-2500'
+APP_RELEASE = 'v533_02_v50103_excel_2401_2500'
+SOLVER_VERSION = 'v533-02-v50103-excel-2401-2500'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -2203,10 +2203,19 @@ def _v52904_speed_division_semantic_issues(task_text: str, result_text: str) -> 
 
     candidates: list[dict[str, Any]] = []
     for index, line in enumerate(lines):
+        # V533.02: column-method titles repeat the arithmetic expression
+        # (“Метод деления в столбик: 450 : 30 = 15”) only as a heading.  They
+        # are not solution action lines and should not be checked for units or
+        # dash explanations; otherwise restored visible column cards are falsely
+        # flagged by the speed-unit guard.
+        if re.search(r'^\s*метод\s+(?:сложения|вычитания|умножения|деления)\s+в\s+столбик', line, flags=re.IGNORECASE):
+            continue
         result_match = re.search(r'=\s*(-?\d+(?:[,.]\d+)?)', line)
         if not result_match:
             continue
         left = line[:result_match.start()]
+        if re.search(r'метод\s+(?:сложения|вычитания|умножения|деления)\s+в\s+столбик', left, flags=re.IGNORECASE):
+            continue
         if not re.search(r'[:/÷]', left):
             continue
         unit_match = re.search(r'=\s*-?\d+(?:[,.]\d+)?\s*\(([^)]+)\)', line)
