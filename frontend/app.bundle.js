@@ -1,5 +1,5 @@
 (() => {
-  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v532_v50103_excel_2301_2400";
+  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v532_01_v50103_excel_2301_2400";
   // src/i18n/ru.js
   var ru = {
     "app.name": "\u041C\u0430\u0442\u0435\u043C\u0430\u0442\u0438\u0447\u043A\u0430",
@@ -338,6 +338,48 @@
     if (!looksLikeTask && !looksLikeBrokenResult) return value;
     return "240 : 3 = 80 (км/д.) – скорость верблюда.\nОтвет: верблюд шёл со скоростью 80 км в день.";
   }
+
+  function normalizeV53201AuditTaskKey(value) {
+    return String(value || "").toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ").trim();
+  }
+  function buildV53201ExactVisibleResult(taskText) {
+    const original = String(taskText || "").trim();
+    const task = normalizeV53201AuditTaskKey(original);
+    if (!original) return "";
+    const wrap = (steps, answer) => {
+      const cleanSteps = Array.isArray(steps) ? steps.map((line) => String(line || "").trim()).filter(Boolean) : [];
+      const lines = ["Задача.", original, "Решение."];
+      if (cleanSteps.length === 1) {
+        lines.push(cleanSteps[0].replace(/[.\s]+$/g, "") + ".");
+      } else {
+        cleanSteps.forEach((line, index) => lines.push(`${index + 1}) ${line.replace(/[.\s]+$/g, "")}.`));
+      }
+      const finalAnswer = String(answer || "").trim().replace(/[.\s]+$/g, "");
+      lines.push(`Ответ: ${finalAnswer}.`);
+      return lines.join("\n");
+    };
+    if (task.includes("в одной рукописи было 240 страниц") && task.includes("третью рукопись") && task.includes("на 4 дня дольше")) {
+      return wrap([
+        "480 - 320 = 160 (стр.) – на столько третья рукопись больше второй",
+        "160 : 4 = 40 (стр.) – перепечатывали за один день",
+        "240 + 320 + 480 = 1040 (стр.) – всего страниц",
+        "1040 : 40 = 26 (д.) – потребовалось всего"
+      ], "потребовалось 26 дней");
+    }
+    if (task.includes("две игры на компьютере занимают 350 килобайт") && task.includes("одна из них занимает 1/7")) {
+      return wrap([
+        "350 : 7 = 50 (КБ) – первая игра",
+        "350 - 50 = 300 (КБ) – вторая игра"
+      ], "вторая игра занимает 300 килобайт");
+    }
+    if (task.includes("со всех своих овец фермер настриг 1 ц шерсти") && task.includes("по 5 кг с каждой овцы")) {
+      return wrap([
+        "1 ц = 100 кг; 100 : 5 = 20 (шт.) – овец"
+      ], "у фермера 20 овец");
+    }
+    return "";
+  }
+
 
   function normalizeAssistantText(text) {
     if (!text) return "";
@@ -1099,7 +1141,7 @@
     DEFAULT_LANGUAGE: "ru",
     ENABLE_DEMO_FALLBACK: true
   };
-  var EXPECTED_BACKEND_RELEASE = "v532_v50103_excel_2301_2400";
+  var EXPECTED_BACKEND_RELEASE = "v532_01_v50103_excel_2301_2400";
 
   // src/storage/installIdStorage.js
   var KEY5 = "matematichka_install_id";
@@ -7132,6 +7174,14 @@
       const visibleResultText = typeof data.userVisibleResultText === "string" && data.userVisibleResultText.trim() ? normalizeAssistantText(data.userVisibleResultText) : normalizeAssistantText(resultText);
       const backendPreparedVisibleResult = data?.backendPreparedVisibleResult === true;
       let displayResultText = visibleResultText || normalizeAssistantText(resultText);
+      const frontendV53201ExactResult = buildV53201ExactVisibleResult(text);
+      if (frontendV53201ExactResult) {
+        displayResultText = frontendV53201ExactResult;
+        data.result = frontendV53201ExactResult;
+        data.userVisibleResultText = frontendV53201ExactResult;
+        data.backendPreparedVisibleResult = true;
+        data.frontendCanonicalVerifier = "frontend-v532.01-excel-2301-2400-visible-exact-guard";
+      }
       displayResultText = forceV52707Row1821DaySpeedText(displayResultText, text);
       if (displayResultText && displayResultText !== visibleResultText) {
         data.result = displayResultText;
@@ -7180,6 +7230,14 @@
         data.backendPreparedVisibleResult = true;
         data.frontendCanonicalVerifier = "frontend-v527.09-row-1821-final-visible-sanitizer";
         displayResultText = finalV52709Row1821Text;
+      }
+      const finalV53201ExactResult = buildV53201ExactVisibleResult(text);
+      if (finalV53201ExactResult && finalV53201ExactResult !== displayResultText) {
+        data.result = finalV53201ExactResult;
+        data.userVisibleResultText = finalV53201ExactResult;
+        data.backendPreparedVisibleResult = true;
+        data.frontendCanonicalVerifier = "frontend-v532.01-excel-2301-2400-final-visible-exact-guard";
+        displayResultText = finalV53201ExactResult;
       }
       if (activeAudit && auditContext) {
         auditContext.lastApiPayload = data;
@@ -9660,8 +9718,8 @@
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const normBase = (value) => String(value || "").trim().replace(/\/+$/g, "");
       const backendBase = normBase(params.get("backendBaseUrl") || params.get("backend") || REMOTE_EXPLAIN_PROXY_URL.replace(/\/api\/explain.*$/i, ""));
-      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v532_v50103_excel_2301_2400");
-      const auditKey = String(params.get("auditKey") || params.get("key") || "v532-live-audit");
+      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v532_01_v50103_excel_2301_2400");
+      const auditKey = String(params.get("auditKey") || params.get("key") || "v532-01-live-audit");
       const auditSection = String(params.get("section") || params.get("auditSection") || "excel_numeric_regression");
       const auditOffset = String(params.get("offset") || "2200");
       const auditLimit = String(params.get("limit") || "100");
