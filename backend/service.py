@@ -12,8 +12,8 @@ from backend.text_utils import NON_MATH_REPLY, looks_like_math_input
 from backend.platform.request_shape_guards import build_multi_task_payload, canonicalize_system_submission, is_multi_task_submission
 from backend.live_math_solver import solve_live_math_first
 
-APP_RELEASE = 'v533_02_v50103_excel_2401_2500'
-SOLVER_VERSION = 'v533-02-v50103-excel-2401-2500'
+APP_RELEASE = 'v533_03_v50103_excel_2401_2500'
+SOLVER_VERSION = 'v533-03-v50103-excel-2401-2500'
 
 _BAD_INTERNAL_MARKERS = (
     'Zad3',
@@ -2190,8 +2190,53 @@ def _v52904_speed_division_semantic_issues(task_text: str, result_text: str) -> 
     task_norm_v533 = str(task_text or '').lower().replace('ё', 'е')
     if re.search(r'во\s+сколько\s+раз[^?!.]*скорост', task_norm_v533):
         return []
-    lines = [line.strip() for line in str(result_text or '').replace('\r', '\n').split('\n') if line.strip()]
-    answer_line = next((line for line in lines if re.match(r'^ответ\s*:', line, flags=re.IGNORECASE)), '')
+
+    raw_result = str(result_text or '').replace('\r', '\n')
+    flat_result = re.sub(r'\s+', ' ', raw_result).strip()
+    method_title_re = r'метод\s+(?:сложения|вычитания|умножения|деления)\s+в\s+столбик'
+
+    # V533.03: live-audit reads browser textContent, where all cards may be
+    # collapsed into one long line.  If we check that line as-is, the guard sees
+    # column-method headings such as “Метод деления в столбик: 450 : 30 = 15”
+    # and treats them as speed actions without units.  Rebuild only visible
+    # solution action fragments (“1) ... – ...”) and stop each fragment before
+    # any column-method card.
+    numbered_segments: list[str] = []
+    numbered_pattern = re.compile(
+        rf'(?:^|(?<=\s))\d+\)\s+.*?'
+        rf'(?=(?:\s+\d+\)\s+)|(?:\s+{method_title_re}\b)|(?:\s+Ответ\s*:)|$)',
+        flags=re.IGNORECASE,
+    )
+    for match in numbered_pattern.finditer(flat_result):
+        segment = match.group(0).strip()
+        if segment:
+            numbered_segments.append(segment)
+
+    if numbered_segments:
+        lines = numbered_segments
+    else:
+        lines = [line.strip() for line in raw_result.split('\n') if line.strip()]
+
+    cleaned_lines: list[str] = []
+    for line in lines:
+        value = str(line or '').strip()
+        if not value:
+            continue
+        if re.search(rf'^\s*{method_title_re}\b', value, flags=re.IGNORECASE):
+            continue
+        # If a renderer still placed a method card after an action on the same
+        # textual line, keep only the action itself.
+        value = re.split(rf'\s+{method_title_re}\b', value, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+        if not value:
+            continue
+        if re.match(r'^(?:пояснения|определяем|подбираем|смотрим|пишем|сносим|теперь\s+работаем|деление\s+закончено|получили)\b', value.lower().replace('ё', 'е')):
+            continue
+        cleaned_lines.append(value)
+
+    answer_line = next((line for line in cleaned_lines if re.match(r'^ответ\s*:', line, flags=re.IGNORECASE)), '')
+    if not answer_line:
+        answer_match = re.search(r'Ответ\s*:[^\n]+$', raw_result, flags=re.IGNORECASE)
+        answer_line = answer_match.group(0).strip() if answer_match else ''
     answer_number_match = re.search(r'-?\d+(?:[,.]\d+)?', answer_line)
     try:
         answer_number = float(answer_number_match.group(0).replace(',', '.')) if answer_number_match else None
@@ -2202,20 +2247,13 @@ def _v52904_speed_division_semantic_issues(task_text: str, result_text: str) -> 
     expected_rate = answer_rate or task_rate
 
     candidates: list[dict[str, Any]] = []
-    for index, line in enumerate(lines):
-        # V533.02: column-method titles repeat the arithmetic expression
-        # (“Метод деления в столбик: 450 : 30 = 15”) only as a heading.  They
-        # are not solution action lines and should not be checked for units or
-        # dash explanations; otherwise restored visible column cards are falsely
-        # flagged by the speed-unit guard.
-        if re.search(r'^\s*метод\s+(?:сложения|вычитания|умножения|деления)\s+в\s+столбик', line, flags=re.IGNORECASE):
+    for index, line in enumerate(cleaned_lines):
+        if re.search(rf'\b{method_title_re}\b', line, flags=re.IGNORECASE):
             continue
         result_match = re.search(r'=\s*(-?\d+(?:[,.]\d+)?)', line)
         if not result_match:
             continue
         left = line[:result_match.start()]
-        if re.search(r'метод\s+(?:сложения|вычитания|умножения|деления)\s+в\s+столбик', left, flags=re.IGNORECASE):
-            continue
         if not re.search(r'[:/÷]', left):
             continue
         unit_match = re.search(r'=\s*-?\d+(?:[,.]\d+)?\s*\(([^)]+)\)', line)
@@ -2249,6 +2287,13 @@ def _v52904_speed_division_semantic_issues(task_text: str, result_text: str) -> 
         ]
         if matching:
             target_indexes.add(int(matching[-1]['index']))
+        else:
+            # Speed-comparison questions can have a final subtraction answer
+            # (for example, 18 - 15 = 3 км/ч).  The distance/time divisions
+            # before that final comparison are still speed calculations and must
+            # keep compound units and speed explanations even when their results
+            # do not equal the final numeric answer.
+            target_indexes.update(int(candidate['index']) for candidate in candidates)
     elif expected_rate and candidates:
         # A speed question with a known distance/time unit but no numeric answer
         # still has one final division step; use the last division candidate.
@@ -2272,7 +2317,6 @@ def _v52904_speed_division_semantic_issues(task_text: str, result_text: str) -> 
         ):
             issues.append('speed_division_rate_unit_mismatch')
     return list(dict.fromkeys(issues))
-
 
 def _v4011_plural(value: int | str, unit: str) -> str:
     key = _v4011_norm_key(unit)

@@ -1,5 +1,5 @@
 (() => {
-  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v533_02_v50103_excel_2401_2500";
+  if (typeof window !== "undefined") window.__MATH_APP_BUILD__ = "v533_03_v50103_excel_2401_2500";
   // src/i18n/ru.js
   var ru = {
     "app.name": "\u041C\u0430\u0442\u0435\u043C\u0430\u0442\u0438\u0447\u043A\u0430",
@@ -1161,7 +1161,7 @@
     DEFAULT_LANGUAGE: "ru",
     ENABLE_DEMO_FALLBACK: true
   };
-  var EXPECTED_BACKEND_RELEASE = "v533_02_v50103_excel_2401_2500";
+  var EXPECTED_BACKEND_RELEASE = "v533_03_v50103_excel_2401_2500";
 
   // src/storage/installIdStorage.js
   var KEY5 = "matematichka_install_id";
@@ -6562,7 +6562,7 @@
   function renderExplanationWithColumns({ explanationText, taskText }) {
     const v533AuditExactVisible = buildV533AuditExactVisibleResult(taskText);
     const v53202ExactVisible = buildV53202ExactVisibleResult(taskText);
-    // V533.02: exact visible contracts must fix units/wording, but they must
+    // V533.03: exact visible contracts must fix units/wording, but they must
     // not bypass buildPreparedExplanationData.  That builder is where the
     // visible column-method cards are attached.  V533.01 returned early here,
     // so the user-facing solution lost all “Метод ... в столбик” computations.
@@ -9789,8 +9789,8 @@
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const normBase = (value) => String(value || "").trim().replace(/\/+$/g, "");
       const backendBase = normBase(params.get("backendBaseUrl") || params.get("backend") || REMOTE_EXPLAIN_PROXY_URL.replace(/\/api\/explain.*$/i, ""));
-      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v533_02_v50103_excel_2401_2500");
-      const auditKey = String(params.get("auditKey") || params.get("key") || "v533-02-live-audit");
+      const release = String(params.get("release") || EXPECTED_BACKEND_RELEASE || "v533_03_v50103_excel_2401_2500");
+      const auditKey = String(params.get("auditKey") || params.get("key") || "v533-03-live-audit");
       const auditSection = String(params.get("section") || params.get("auditSection") || "excel_numeric_regression");
       const auditOffset = String(params.get("offset") || "2400");
       const auditLimit = String(params.get("limit") || "100");
